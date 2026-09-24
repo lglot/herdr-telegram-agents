@@ -391,7 +391,7 @@ func (g *Gateway) send(ctx context.Context, chatID int64, threadID int, out doma
 	}
 	var parts []string
 	if markdown {
-		parts = splitMarkdown(out.Text, limit)
+		parts = splitMarkdown(telegramTables(out.Text), limit)
 	} else {
 		parts = chunk(out.Text, limit)
 	}

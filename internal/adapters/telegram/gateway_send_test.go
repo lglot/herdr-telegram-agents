@@ -443,6 +443,19 @@ func TestSendMarkdownRenders(t *testing.T) {
 	}
 }
 
+func TestSendMarkdownWideTableAsCards(t *testing.T) {
+	h := newHarness(t)
+	h.api.on("sendMessage", func(url.Values) apiReply { return okReply(map[string]any{"message_id": 5}) })
+	text := "| Richiesta | Comportamento ora |\n|---|---|\n| Il pane non si chiude | Default: pane e transcript restano aperti, `--close-source` chiude |"
+	if _, err := h.gw.Send(h.ctx, domain.Outgoing{ThreadID: 42, Text: text, Markdown: true}); err != nil {
+		t.Fatal(err)
+	}
+	want := "• <b>Richiesta</b>: Il pane non si chiude\n  <b>Comportamento ora</b>: Default: pane e transcript restano aperti, <code>--close-source</code> chiude"
+	if calls := h.api.callsOf("sendMessage"); len(calls) != 1 || calls[0].form.Get("text") != want {
+		t.Fatalf("text = %q", calls[0].form.Get("text"))
+	}
+}
+
 func TestSendMarkdownFallsBackToPre(t *testing.T) {
 	h := newHarness(t)
 	n := 0
