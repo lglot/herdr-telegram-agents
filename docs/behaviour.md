@@ -494,6 +494,21 @@ or `password reset` are left alone. The log records how many replacements
 of which kind were made (`secrets redacted kinds="openai=1"`), never the
 value. Topic names, the daemon log and the Herdr side are not touched.
 
+## Screen rewrite
+
+To rewrite blocked and done screen posts as Markdown, create `llm.json`
+with mode 0600 in the Herdr plugin config dir:
+
+```json
+{"url":"https://openrouter.ai/api","model":"mistralai/ministral-14b-2512","key":"<OpenRouter API key>"}
+```
+
+Restart the daemon after changing this file. The cloud provider receives the screen
+after secret redaction, even when `Redact secrets` is off for Telegram.
+Proposed options are used only when the screen parser found none; each
+button is checked against the redacted screen before it can be sent. A
+missing setting, empty answer, error or 5 s timeout keeps the screen post.
+
 ## Topic cleanup
 
 Once a day, at daemon start and as soon as `Delete closed topics after`
@@ -584,6 +599,7 @@ in `config.json`:
 | File | Location | Content |
 |------|----------|---------|
 | `config.json` | Herdr plugin config dir (`HERDR_PLUGIN_CONFIG_DIR`), mode 0600 | bot token, chat id and title, operator ids, observer ids (`observer_ids`, written by `/observers`), log level |
+| `llm.json` | config dir, mode 0600 | optional cloud endpoint, model and API key for screen rewrite |
 | `mapping.json` | Herdr plugin state dir (`HERDR_PLUGIN_STATE_DIR`) | agent to topic mapping and the dashboard message id (`dashboard_message_id`); entries of exited agents stay until the topic cleanup deletes their topic, or beyond 500 entries |
 | `options.json` | config dir, mode 0600 | the `/options` choices |
 | `inbox/` | state dir, mode 0700, files 0600 | attachments sent to topics, swept daily after `Delete files after` |

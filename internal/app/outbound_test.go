@@ -1864,3 +1864,261 @@ func TestCleanScreen(t *testing.T) {
 		t.Errorf("cleanScreen plain = %q, %d", got, n)
 	}
 }
+
+// fakeRenderer answers every rewrite with text/choices/err and records the
+// call, like fakeTranscriber does for voice notes.
+type fakeRenderer struct {
+	text    string
+	choices []domain.Choice
+	err     error
+	onCall  func()
+	calls   int
+	kind    string
+	screen  string
+	blocked bool
+}
+
+func (f *fakeRenderer) Render(_ context.Context, kind, screen string, blocked bool) (domain.Rendered, error) {
+	f.calls++
+	f.kind, f.screen, f.blocked = kind, screen, blocked
+	if f.onCall != nil {
+		f.onCall()
+	}
+	if f.err != nil {
+		return domain.Rendered{}, f.err
+	}
+	return domain.Rendered{Text: f.text, Choices: f.choices}, nil
+}
+
+// llmFixture returns a fixture with the rewrite switched on for blocked
+// question screens of a claude agent.
+func llmFixture(t *testing.T, r *fakeRenderer, screen string) (*bridgeFixture, domain.Agent) {
+	t.Helper()
+	f := newBridgeFixture(t)
+	f.out.redact = domain.NewRedactor(testBotToken)
+	f.out.render = r
+	a := f.add(t, "p1", "t1", "reviewer", domain.StatusWorking)
+	a.Kind = "claude"
+	f.herdr.SetScreen("p1", screen)
+	f.out.Observe(AgentEvent{Kind: AgentChanged, Agent: f.setStatus(a, domain.StatusBlocked)})
+	return f, a
+}
+
+func TestOutboundLLMBlockedRegexKept(t *testing.T) {
+	// The regex dialog wins the buttons, the LLM wins the text.
+	r := &fakeRenderer{text: "**Allow edit?**",
+		choices: []domain.Choice{{Number: 1, Label: "Si"}, {Number: 2, Label: "No"}}}
+	f, _ := llmFixture(t, r, "\n  Allow edit?  \n  1. Yes  \n  2. No  \n\n")
+	f.fire(t, 1)
+	sent := f.tg.Sent()
+	if len(sent) != 1 || sent[0].Text != "**Allow edit?**" || !sent[0].Markdown || sent[0].Code {
+		t.Fatalf("Sent = %+v", sent)
+	}
+	if len(sent[0].Buttons) != 2 || sent[0].Buttons[0].Data != "1" || sent[0].Buttons[1].Data != "2" ||
+		!strings.Contains(sent[0].Buttons[0].Text, "Yes") {
+		t.Fatalf("Buttons = %+v", sent[0].Buttons)
+	}
+	if r.calls != 1 || r.kind != "claude" || !r.blocked {
+		t.Fatalf("renderer calls = %d kind = %q blocked = %v", r.calls, r.kind, r.blocked)
+	}
+	if logs := f.logBuf.String(); !strings.Contains(logs, `"msg":"screen posted"`) || !strings.Contains(logs, `"llm":true`) {
+		t.Errorf("log lacks screen posted with llm=true: %s", logs)
+	}
+}
+
+func TestOutboundLLMGroundedButtons(t *testing.T) {
+	// "1)" rows miss the regex (choiceItem wants "N. ") so the validated
+	// LLM options become single-select buttons.
+	screen := "Progress...\nPick a color:\n1) Red\n2) Green\n"
+	for _, tc := range []struct {
+		kind    string
+		confirm bool
+	}{
+		{"claude", false},
+		{"pi", true},
+	} {
+		t.Run(tc.kind, func(t *testing.T) {
+			r := &fakeRenderer{text: "# Pick a color",
+				choices: []domain.Choice{{Number: 1, Label: "Red"}, {Number: 2, Label: "Green"}}}
+			f := newBridgeFixture(t)
+			f.out.redact = domain.NewRedactor(testBotToken)
+			f.out.render = r
+			a := f.add(t, "p1", "t1", "reviewer", domain.StatusWorking)
+			a.Kind = tc.kind
+			f.herdr.SetScreen("p1", screen)
+			f.out.Observe(AgentEvent{Kind: AgentChanged, Agent: f.setStatus(a, domain.StatusBlocked)})
+			f.fire(t, 1)
+			sent := f.tg.Sent()
+			if len(sent) != 1 || sent[0].Text != "# Pick a color" || !sent[0].Markdown {
+				t.Fatalf("Sent = %+v", sent)
+			}
+			if len(sent[0].Buttons) != 2 || sent[0].Buttons[0].Data != "1" || sent[0].Buttons[1].Data != "2" {
+				t.Fatalf("Buttons = %+v", sent[0].Buttons)
+			}
+			if kb := f.out.keyboards[a.Key]; kb.confirm != tc.confirm || kb.multi || len(kb.choices) != 2 {
+				t.Fatalf("keyboard = %+v", kb)
+			}
+		})
+	}
+}
+
+func TestOutboundLLMKindWithoutKeys(t *testing.T) {
+	// Codex keys are still unmeasured: grounded options post text-only.
+	r := &fakeRenderer{text: "# Pick a color",
+		choices: []domain.Choice{{Number: 1, Label: "Red"}, {Number: 2, Label: "Green"}}}
+	f := newBridgeFixture(t)
+	f.out.redact = domain.NewRedactor(testBotToken)
+	f.out.render = r
+	a := f.add(t, "p1", "t1", "reviewer", domain.StatusWorking)
+	a.Kind = "codex"
+	f.herdr.SetScreen("p1", "Progress...\nPick a color:\n1) Red\n2) Green\n")
+	f.out.Observe(AgentEvent{Kind: AgentChanged, Agent: f.setStatus(a, domain.StatusBlocked)})
+	f.fire(t, 1)
+	sent := f.tg.Sent()
+	if len(sent) != 1 || sent[0].Text != "# Pick a color" || len(sent[0].Buttons) != 0 {
+		t.Fatalf("Sent = %+v", sent)
+	}
+	if logs := f.logBuf.String(); !strings.Contains(logs, "kind without keys") {
+		t.Errorf("log lacks the kind notice: %s", logs)
+	}
+}
+
+func TestOutboundLLMFallbackPostsScreen(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		text string
+		err  error
+	}{
+		{"error", "**Allow edit?**", errors.New("llm: status 500")},
+		{"empty", "  ", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := &fakeRenderer{text: tc.text, err: tc.err,
+				choices: []domain.Choice{{Number: 1, Label: "Si"}, {Number: 2, Label: "No"}}}
+			f, _ := llmFixture(t, r, "\n  Allow edit?  \n  1. Yes  \n  2. No  \n\n")
+			f.fire(t, 1)
+			sent := f.tg.Sent()
+			if len(sent) != 1 || sent[0].Text != "  Allow edit?\n  1. Yes\n  2. No" || !sent[0].Code || sent[0].Markdown {
+				t.Fatalf("Sent = %+v", sent)
+			}
+			if len(sent[0].Buttons) != 2 {
+				t.Fatalf("Buttons = %+v", sent[0].Buttons)
+			}
+		})
+	}
+}
+
+func TestOutboundLLMMultiSkipped(t *testing.T) {
+	// A multi-select dialog keeps today's post: the toggle refresh would
+	// overwrite an LLM rewrite with preHTML.
+	r := &fakeRenderer{text: "# Toggle", choices: []domain.Choice{{Number: 1, Label: "A"}, {Number: 2, Label: "B"}}}
+	f, _ := llmFixture(t, r, "  1. [ ] A\n  2. [ ] B\n")
+	f.fire(t, 1)
+	sent := f.tg.Sent()
+	if len(sent) != 1 || !sent[0].Code || sent[0].Text != "  1. [ ] A\n  2. [ ] B" {
+		t.Fatalf("Sent = %+v", sent)
+	}
+	if len(sent[0].Buttons) != 3 {
+		t.Fatalf("Buttons = %+v", sent[0].Buttons)
+	}
+	if r.calls != 0 {
+		t.Fatalf("renderer calls = %d, want 0", r.calls)
+	}
+}
+
+func TestOutboundLLMForceSkipped(t *testing.T) {
+	// The catch-up is one job for every agent: no rewrite on force.
+	r := &fakeRenderer{text: "# Q"}
+	f := newBridgeFixture(t)
+	f.out.redact = domain.NewRedactor(testBotToken)
+	f.out.render = r
+	a := f.add(t, "p1", "t1", "reviewer", domain.StatusWorking)
+	a.Kind = "claude"
+	f.herdr.SetScreen("p1", "same question")
+	blocked := f.setStatus(a, domain.StatusBlocked)
+	f.out.Observe(AgentEvent{Kind: AgentChanged, Agent: blocked})
+	if err := f.out.fire(f.ctx, a.Key, true); err != nil {
+		t.Fatal(err)
+	}
+	sent := f.tg.Sent()
+	if len(sent) != 1 || sent[0].Text != "same question" || !sent[0].Code {
+		t.Fatalf("Sent = %+v", sent)
+	}
+	if r.calls != 0 {
+		t.Fatalf("renderer calls = %d, want 0", r.calls)
+	}
+}
+
+func TestOutboundLLMDuplicateSkipped(t *testing.T) {
+	r := &fakeRenderer{text: "# Q"}
+	f, a := llmFixture(t, r, "same question")
+	f.fire(t, 1)
+	f.out.Observe(AgentEvent{Kind: AgentChanged, Agent: f.setStatus(a, domain.StatusWorking)})
+	f.out.Observe(AgentEvent{Kind: AgentChanged, Agent: f.setStatus(a, domain.StatusBlocked)})
+	f.fire(t, 1)
+	if n := len(f.tg.Sent()); n != 1 {
+		t.Fatalf("duplicate posted: %d sends", n)
+	}
+	if r.calls != 1 {
+		t.Fatalf("renderer calls = %d, want 1", r.calls)
+	}
+}
+
+func TestOutboundLLMDoneFormattedUntouched(t *testing.T) {
+	f, a := metaFixture(t, domain.DoneFormatted)
+	r := &fakeRenderer{text: "# Done"}
+	f.out.redact = domain.NewRedactor(testBotToken)
+	f.out.render = r
+	f.out.Observe(AgentEvent{Kind: AgentChanged, Agent: f.setStatus(a, domain.StatusDone)})
+	f.fire(t, 1)
+	sent := f.tg.Sent()
+	if len(sent) != 1 || sent[0].Text != "Done. **All** tests pass." || !sent[0].Markdown {
+		t.Fatalf("Sent = %+v", sent)
+	}
+	if r.calls != 0 {
+		t.Fatalf("renderer calls = %d, want 0", r.calls)
+	}
+}
+
+func TestOutboundLLMMovedOn(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+	}{
+		{"success", nil},
+		{"failed render", errors.New("timeout")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// The status changed during the rewrite: even a failed render
+			// must not post the old screen for another turn.
+			var f *bridgeFixture
+			var a domain.Agent
+			r := &fakeRenderer{text: "# Q", err: tc.err}
+			r.onCall = func() { f.setStatus(a, domain.StatusWorking) }
+			f, a = llmFixture(t, r, "same question")
+			f.fire(t, 1)
+			if n := len(f.tg.Sent()); n != 0 {
+				t.Fatalf("moved-on screen posted: %d sends", n)
+			}
+			if logs := f.logBuf.String(); !strings.Contains(logs, `"reason":"moved_on"`) {
+				t.Errorf("log lacks moved_on: %s", logs)
+			}
+		})
+	}
+}
+
+func TestOutboundLLMNewQuestionWhileRendering(t *testing.T) {
+	var f *bridgeFixture
+	var a domain.Agent
+	r := &fakeRenderer{text: "# Old question"}
+	r.onCall = func() {
+		newQuestion := a
+		newQuestion.StateChangeSeq++
+		f.agents[a.Key] = newQuestion
+	}
+	f, a = llmFixture(t, r, "old question")
+	f.fire(t, 1)
+	if got := len(f.tg.Sent()); got != 0 {
+		t.Fatalf("stale question posted: %d sends", got)
+	}
+}

@@ -46,6 +46,8 @@ type Services struct {
 	// Stt transcribes voice notes into the prompt; nil prompts with the
 	// saved file's path, like any other attachment.
 	Stt domain.Transcriber
+	// Render rewrites screens into Markdown; nil posts screens as usual.
+	Render domain.Renderer
 	// Config saves config.json when /observers changes the observer list;
 	// nil refuses the change with a notice.
 	Config domain.ConfigStore
@@ -65,9 +67,12 @@ func NewBridge(cfg domain.Config, herdr domain.HerdrGateway, tg domain.TelegramG
 	}
 	topics := reconciler.topics()
 	// Every post of the bridge passes the redactor; the reconciler keeps
-	// the raw gateway because topic names are agent labels.
-	tg = newRedactingGateway(tg, domain.NewRedactor(cfg.BotToken), opts.RedactEnabled, log)
+	// the raw gateway because topic names are agent labels. The outbound
+	// shares the redactor for the LLM input and the optional renderer.
+	red := domain.NewRedactor(cfg.BotToken)
+	tg = newRedactingGateway(tg, red, opts.RedactEnabled, log)
 	out := newOutbound(herdr, tg, cfg.ChatID, cfg.OperatorIDs, topics, registry.Agent, registry.Live, capture, opts, svc.Replies, clock, log)
+	out.render, out.redact = svc.Render, red
 	in := newInbound(herdr, tg, topics, registry.Agent, registry.Live, out, opts, svc, cfg, clock, log)
 	b := &Bridge{
 		out:         out,

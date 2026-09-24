@@ -55,7 +55,12 @@ type outbound struct {
 	live       func() []domain.Agent
 	// replies finds the agent's last reply in its transcript for the done
 	// post when doneMode asks for it; nil means the screen is always used.
-	replies  domain.ReplySource
+	replies domain.ReplySource
+	// render rewrites screens through the configured LLM; nil keeps every post
+	// screen-based. redact masks secrets in the LLM input; nil sends raw.
+	// Both are set after newOutbound by NewBridge and by the tests.
+	render   domain.Renderer
+	redact   *domain.Redactor
 	doneMode func() domain.DoneMode
 	// chrome reads the posts.chrome switch: cut Claude Code's input frame
 	// from the bottom of every screen before it is posted, hashed or
@@ -643,17 +648,69 @@ func (o *outbound) fire(ctx context.Context, key domain.Key, force bool) error {
 	if o.lastPosted[key] == hash && !force {
 		return o.skip(key, "duplicate")
 	}
+	// The LLM rewrite runs on screen posts only (blocked and
+	// done-screen), never on catch-up force nor on multi-select dialogs
+	// whose toggle refresh rewrites the post with preHTML.
+	useLLM := o.render != nil && mode == domain.DoneScreen && !force
+	var reDialog domain.Dialog
+	if agent.Status == domain.StatusBlocked {
+		reDialog = domain.ParseDialog(text)
+		if reDialog.Multi {
+			useLLM = false
+		}
+	}
+	redacted := text
+	if useLLM && o.redact != nil {
+		if r, stats := o.redact.Redact(text); stats.Total() > 0 {
+			o.log.Debug("llm input redacted", slog.String("key", key.String()), slog.String("stats", stats.String()))
+			redacted = r
+		}
+	}
+	llmOK := false
+	var llmText string
+	var llmChoices []domain.Choice
+	var llmDur time.Duration
+	if useLLM {
+		t0 := o.clock.Now()
+		r, err := o.render.Render(ctx, agent.Kind, redacted, agent.Status == domain.StatusBlocked)
+		llmDur = o.clock.Now().Sub(t0)
+		if o.movedOn(key, agent) {
+			return o.skip(key, "moved_on")
+		}
+		switch {
+		case err != nil:
+			o.log.Warn("llm render failed", slog.String("key", key.String()), slog.String("err", err.Error()))
+		case strings.TrimSpace(r.Text) == "":
+			o.log.Info("llm render empty, screen kept", slog.String("key", key.String()))
+		default:
+			llmOK = true
+			llmText, llmChoices = r.Text, r.Choices
+		}
+	}
 	if err := o.retire(ctx, key, "superseded"); err != nil {
 		return err
 	}
-	out := domain.Outgoing{ThreadID: entry.ThreadID, Text: text, Code: mode != domain.DoneFormatted, Markdown: mode == domain.DoneFormatted, Notify: notify, Footer: footer}
+	outText, outCode, outMarkdown := text, mode != domain.DoneFormatted, mode == domain.DoneFormatted
+	if llmOK {
+		outText, outCode, outMarkdown = llmText, false, true
+	}
+	out := domain.Outgoing{ThreadID: entry.ThreadID, Text: outText, Code: outCode, Markdown: outMarkdown, Notify: notify, Footer: footer}
 	if mode != domain.DoneScreen {
 		out.MaxParts = replyMaxParts
 		out.Fold = o.fold()
 	}
 	var dialog domain.Dialog
 	if agent.Status == domain.StatusBlocked {
-		dialog = domain.ParseDialog(text)
+		dialog = reDialog
+		if len(dialog.Choices) == 0 && llmOK {
+			if grounded, ok := domain.GroundChoices(redacted, llmChoices); ok {
+				if confirm, ok := domain.PressConfirm(agent.Kind); ok {
+					dialog = domain.Dialog{Choices: grounded, Confirm: confirm}
+				} else {
+					o.log.Debug("llm choices dropped, kind without keys", slog.String("key", key.String()), slog.String("kind", agent.Kind))
+				}
+			}
+		}
 		out.Buttons = choiceButtons(dialog)
 		o.logChoices(key, dialog)
 	}
@@ -695,7 +752,7 @@ func (o *outbound) fire(ctx context.Context, key domain.Key, force bool) error {
 	o.log.Info("screen posted", slog.String("key", key.String()), slog.Int("thread_id", entry.ThreadID),
 		slog.String("status", string(agent.Status)), slog.Int("lines", strings.Count(text, "\n")+1), slog.Int("bytes", len(text)),
 		slog.Int("buttons", len(out.Buttons)), slog.Int("message_id", id), slog.Bool("notify", out.Notify), slog.Bool("paged", paged), slog.Bool("forced", force),
-		slog.Bool("footer", footer != ""))
+		slog.Bool("footer", footer != ""), slog.Bool("llm", llmOK), slog.Int64("llm_ms", llmDur.Milliseconds()))
 	return nil
 }
 
@@ -1392,6 +1449,13 @@ func (o *outbound) ScreenAll(ctx context.Context, key domain.Key) error {
 		slog.String("status", "history"), slog.Int("lines", n), slog.Int("bytes", len(text)),
 		slog.Bool("document", asDocument), slog.Bool("marked", marked))
 	return nil
+}
+
+// movedOn reports whether the agent left the turn fire saw: the render
+// took a while and the screen may belong to another question already.
+func (o *outbound) movedOn(key domain.Key, agent domain.Agent) bool {
+	cur, ok := o.agents(key)
+	return !ok || cur.Status != agent.Status || cur.StateChangeSeq != agent.StateChangeSeq
 }
 
 func (o *outbound) skip(key domain.Key, reason string) error {

@@ -285,6 +285,22 @@ type Transcriber interface {
 	Transcribe(ctx context.Context, path string) (string, error)
 }
 
+// Rendered is the rewrite of one screen: printable Markdown text and the
+// question options read on it, if any.
+type Rendered struct {
+	Text    string
+	Choices []Choice
+}
+
+// Renderer rewrites a raw agent screen into Markdown for Telegram and
+// proposes the options of the question it shows; an empty text means
+// nothing usable came back and the caller posts the screen as usual.
+// Kind is the agent kind (claude, pi, codex) and blocked tells a question
+// screen from a done one.
+type Renderer interface {
+	Render(ctx context.Context, kind, screen string, blocked bool) (Rendered, error)
+}
+
 // Rights is the bot's standing in the configured chat.
 type Rights struct {
 	IsForum         bool
