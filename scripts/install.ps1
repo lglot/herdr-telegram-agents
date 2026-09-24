@@ -6,7 +6,7 @@ $ErrorActionPreference = "Stop"
 
 Set-Location (Join-Path $PSScriptRoot "..")
 
-$repo = "permgps/herdr-telegram-agents"
+$repo = "lglot/herdr-telegram-agents"
 
 $match = Select-String -Path herdr-plugin.toml -Pattern '^version\s*=\s*"(.*)"' | Select-Object -First 1
 if (-not $match) { throw "install: no version in herdr-plugin.toml" }

@@ -54,8 +54,15 @@ open topic shows a Claude Code question you can answer from the phone.*
 - **A daemon that looks after itself**: starts with Herdr, exits when Herdr
   is gone, heals topic drift on start and on `resync`.
 
-Version `0.10.4`. macOS and Linux are verified end to end; Windows is built and
+Version `0.10.4-lglot.1`. macOS and Linux are verified end to end; Windows is built and
 unit-tested on every change but has not been run against a real Herdr yet.
+
+This is a fork of
+[permgps/herdr-telegram-agents](https://github.com/permgps/herdr-telegram-agents)
+that adds Pi support: the done post's `Reply` from Pi's session file, buttons
+for Pi's `ask_user` questions, and a transcript lookup by the session Herdr
+reports (Claude Code profiles such as `~/.claude-work` included). Releases
+are published from this repository.
 
 ## Requirements
 
@@ -67,7 +74,7 @@ unit-tested on every change but has not been run against a real Herdr yet.
 ## Install
 
 ```bash
-herdr plugin install permgps/herdr-telegram-agents
+herdr plugin install lglot/herdr-telegram-agents
 ```
 
 Herdr clones the repository and runs the plugin's build step, which downloads

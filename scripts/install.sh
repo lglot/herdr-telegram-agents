@@ -9,7 +9,7 @@ set -eu
 
 cd "$(dirname "$0")/.."
 
-repo=permgps/herdr-telegram-agents
+repo=lglot/herdr-telegram-agents
 
 version=$(sed -n 's/^version *= *"\(.*\)"/\1/p' herdr-plugin.toml | head -1)
 if [ -z "$version" ]; then
