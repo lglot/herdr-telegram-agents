@@ -221,15 +221,18 @@ the `Done post` option of the Posts group:
   after the read, a `/screen N` on an idle Claude Code pane may come back
   with fewer than N lines.
 - **Reply**: the agent's own last message, taken from the transcript Claude
-  Code writes for itself. Herdr does not say which session a pane runs, so
-  the daemon takes the pane's working directory, maps it to
-  `~/.claude/projects/<cwd with every non-alphanumeric character as "-">/`
-  and reads the newest `.jsonl` there from the end: the last text the agent
+  Code or Pi writes for itself, read from the end: the last text the agent
   wrote after your last prompt, skipping tool calls, tool results and
-  subagent traffic. A Pi pane is read the same way from Pi's session file,
-  `~/.pi/agent/sessions/--<cwd without the leading "/", every "/", "\" and
-  ":" as "-">--/`. The text is posted as a code block, so Markdown shows as
-  the agent typed it.
+  subagent traffic. The transcript is the session Herdr reports for the
+  pane: Pi's session file, or Claude Code's session id looked up as
+  `<id>.jsonl` under every `~/.claude*/projects/` (so a `CLAUDE_CONFIG_DIR`
+  such as `~/.claude-work` is found too). When Herdr reports no session, or
+  its file is not on disk yet, the daemon falls back to the pane's working
+  directory: the newest `.jsonl` in
+  `~/.claude/projects/<cwd with every non-alphanumeric character as "-">/`,
+  or in `~/.pi/agent/sessions/--<cwd without the leading "/", every "/",
+  "\" and ":" as "-">--/` for Pi. The text is posted as a code block, so
+  Markdown shows as the agent typed it.
 - **Formatted**: the same reply rendered for Telegram: headings become bold,
   `- ` lists become `•`, quotes get a bar, `[text](url)` becomes a link,
   inline code and fenced blocks keep their monospace, pipe tables are
@@ -267,10 +270,12 @@ reply as the agent wrote it, before rendering and before the phone wraps
 them: a list of 25 short items folds, three long paragraphs do not. `Off`
 never folds. `Screen` posts are never folded, whatever the option says.
 
-Limits worth knowing: two Claude Code (or two Pi) panes in the same
-directory cannot be told apart, so the reply of the one that wrote last
-wins (the stale check above catches the case where the other pane wrote
-before this turn began); Pi gets the reply but no summary line; other
+Limits worth knowing: without a session from Herdr, two Claude Code (or two
+Pi) panes in the same directory cannot be told apart, so the reply of the
+one that wrote last wins (the stale check above catches the case where the
+other pane wrote before this turn began); a Claude Code profile outside
+`~/.claude*` is found only by the directory fallback; Pi gets the reply
+but no summary line; other
 agents (Codex, OpenCode, ...) always get the screen; when no
 transcript or no text is found the daemon posts the screen and logs
 `reply source unavailable` with the reason. Blocked posts and `/screen` are

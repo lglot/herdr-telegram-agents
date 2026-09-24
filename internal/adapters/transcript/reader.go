@@ -74,21 +74,25 @@ func (r *Reader) LastReply(ctx context.Context, agent domain.Agent) (domain.Repl
 	default:
 		return domain.Reply{}, fmt.Errorf("%w: unsupported agent %q", domain.ErrNoReply, agent.Kind)
 	}
-	if strings.TrimSpace(agent.Cwd) == "" {
-		return domain.Reply{}, fmt.Errorf("%w: agent has no working directory", domain.ErrNoReply)
-	}
 	home, err := r.home()
 	if err != nil {
 		return domain.Reply{}, fmt.Errorf("%w: home directory: %v", domain.ErrNoReply, err)
 	}
-	dir := filepath.Join(append([]string{home}, append(root, slug(agent.Cwd))...)...)
-	path, modTime, candidates, err := newestTranscript(dir)
-	if err != nil {
-		return domain.Reply{}, err
+	path, modTime := sessionTranscript(home, agent)
+	dir, candidates := "", 1
+	if path == "" {
+		if strings.TrimSpace(agent.Cwd) == "" {
+			return domain.Reply{}, fmt.Errorf("%w: agent has no working directory", domain.ErrNoReply)
+		}
+		dir = filepath.Join(append([]string{home}, append(root, slug(agent.Cwd))...)...)
+		path, modTime, candidates, err = newestTranscript(dir)
+		if err != nil {
+			return domain.Reply{}, err
+		}
 	}
 	age := r.now().Sub(modTime)
 	r.log.Debug("transcript lookup",
-		slog.String("pane", agent.PaneID), slog.String("cwd", agent.Cwd), slog.String("dir", dir),
+		slog.String("pane", agent.PaneID), slog.String("cwd", agent.Cwd), slog.String("dir", dir), slog.Bool("by_session", dir == ""),
 		slog.Int("candidates", candidates), slog.String("chosen", filepath.Base(path)), slog.Int64("age_ms", age.Milliseconds()))
 	text, turn, stats, err := scan(path, r.maxScan)
 	meta := turn.meta()

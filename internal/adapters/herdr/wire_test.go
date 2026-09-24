@@ -55,6 +55,19 @@ func TestDecodeAgentListSample(t *testing.T) {
 	}
 }
 
+func TestToDomainAgentSessionRef(t *testing.T) {
+	var info agentInfo
+	if err := json.Unmarshal([]byte(`{"pane_id":"p1","agent":"pi","agent_session":{"source":"herdr:pi","agent":"pi","kind":"path","value":"/home/op/.pi/agent/sessions/--x--/s.jsonl"}}`), &info); err != nil {
+		t.Fatal(err)
+	}
+	if a := toDomainAgent(info); a.SessionKind != "path" || a.SessionValue != "/home/op/.pi/agent/sessions/--x--/s.jsonl" {
+		t.Fatalf("session ref = %q %q", a.SessionKind, a.SessionValue)
+	}
+	if a := toDomainAgent(agentInfo{PaneID: "p2"}); a.SessionKind != "" || a.SessionValue != "" {
+		t.Fatalf("absent session ref = %q %q", a.SessionKind, a.SessionValue)
+	}
+}
+
 func TestToDomainAgentSession(t *testing.T) {
 	idSession := domain.SessionTuple{Source: "codex", Agent: "codex", Kind: "id", Value: "session-id-42"}
 	pathSession := domain.SessionTuple{Source: "claude-code", Agent: "claude", Kind: "path", Value: "/private/session/abc"}

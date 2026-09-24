@@ -78,7 +78,9 @@ type agentInfo struct {
 }
 
 // agentSessionInfo is Herdr's nullable identity tuple. It is converted to a
-// digest at the wire boundary; its values are never copied into the domain.
+// digest at the wire boundary for the key; kind and value also reach the
+// domain agent, in memory only, so the reply source can open the session's
+// own transcript. They are never persisted.
 type agentSessionInfo struct {
 	Source string `json:"source"`
 	Agent  string `json:"agent"`
@@ -276,6 +278,7 @@ func toDomainAgent(a agentInfo) domain.Agent {
 		name = strings.TrimSpace(*a.Name)
 	}
 	key := domain.Key{PaneID: a.PaneID, TerminalID: a.TerminalID}
+	var sessionKind, sessionValue string
 	if a.AgentSession != nil {
 		key.SessionDigest = (domain.SessionTuple{
 			Source: a.AgentSession.Source,
@@ -283,6 +286,7 @@ func toDomainAgent(a agentInfo) domain.Agent {
 			Kind:   a.AgentSession.Kind,
 			Value:  a.AgentSession.Value,
 		}).Digest()
+		sessionKind, sessionValue = a.AgentSession.Kind, a.AgentSession.Value
 	}
 	return domain.Agent{
 		Key:            key,
@@ -296,6 +300,8 @@ func toDomainAgent(a agentInfo) domain.Agent {
 		StateChangeSeq: a.StateChangeSeq,
 		Focused:        a.Focused,
 		Cwd:            a.Cwd,
+		SessionKind:    sessionKind,
+		SessionValue:   sessionValue,
 	}
 }
 

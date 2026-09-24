@@ -109,6 +109,12 @@ type Agent struct {
 	// source uses it to find the agent's own transcript. Empty when Herdr
 	// does not know it.
 	Cwd string
+	// SessionKind and SessionValue are Herdr's session reference for the
+	// agent ("id" with Claude Code's session id, "path" with Pi's session
+	// file); the reply source reads that transcript before guessing from
+	// Cwd. Held in memory only: the state keeps the digest, never these.
+	SessionKind  string
+	SessionValue string
 }
 
 // labelSeparator joins the workspace and the agent part of a label, the
