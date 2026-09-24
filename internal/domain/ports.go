@@ -279,6 +279,12 @@ type GitRunner interface {
 	Run(ctx context.Context, dir string, args []string) (GitResult, error)
 }
 
+// Transcriber turns a saved voice note into text on this machine; an empty
+// text means nothing was heard.
+type Transcriber interface {
+	Transcribe(ctx context.Context, path string) (string, error)
+}
+
 // Rights is the bot's standing in the configured chat.
 type Rights struct {
 	IsForum         bool

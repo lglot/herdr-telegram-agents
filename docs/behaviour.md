@@ -529,6 +529,21 @@ submitted`. Once a day, at daemon start and as soon as
 are deleted; subdirectories and files of a save in flight are left alone.
 `Off` keeps every file. The sweep logs `inbox sweep deleted=<n>`.
 
+A voice note is transcribed on this machine when whisper.cpp's
+`whisper-cli`, `ffmpeg` and a model are found at daemon start (log `voice
+notes are transcribed`): ffmpeg turns the Ogg/Opus note into 16 kHz wav
+and `whisper-cli` writes the words, which become the prompt as if typed,
+after the caption; the note itself stays in the inbox. The topic gets a
+quoted `🎙️ "<words>"` reply, so a mishearing shows at once, and no extra
+`enter` follows. The model is `$HERDR_TG_WHISPER_MODEL`, else the largest
+`ggml-*.bin` in `~/.local/share/whisper.cpp/`; a Silero VAD model there
+(`ggml-silero-*.bin`) makes whisper skip the silence, without which a
+silent note comes back as an invented word such as `you`. The language is
+`$HERDR_TG_WHISPER_LANGUAGE`, else detected. When the transcription fails
+or hears nothing, the agent gets the path as for any file and the log says
+`voice note not transcribed`. Audio files sent as documents or music are
+never transcribed.
+
 ## Operators and observers
 
 Two kinds of Telegram accounts may talk to the bot, both listed by user id

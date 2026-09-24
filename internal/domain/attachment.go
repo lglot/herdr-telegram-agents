@@ -88,12 +88,12 @@ func DefaultAttachmentName(kind AttachmentKind, mime string) string {
 
 // AttachmentPrompt is the text the agent receives for saved attachments:
 // the caption, a blank line when there is one, then one absolute path per
-// line.
+// line; without paths it is the caption alone.
 func AttachmentPrompt(caption string, paths []string) string {
 	caption = strings.TrimSpace(caption)
 	lines := strings.Join(paths, "\n")
-	if caption == "" {
-		return lines
+	if caption == "" || lines == "" {
+		return caption + lines
 	}
 	return caption + "\n\n" + lines
 }

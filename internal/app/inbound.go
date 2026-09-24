@@ -132,6 +132,9 @@ type inbound struct {
 	// Either may be nil, which refuses the feature with a notice.
 	git   domain.GitRunner
 	inbox domain.InboxStore
+	// stt transcribes a voice note so the agent gets the words; nil sends
+	// the path as for any attachment.
+	stt domain.Transcriber
 	// closing is the message id of the active /close question per agent;
 	// a newer question retires the older one. Bridge goroutine only.
 	closing map[domain.Key]int
@@ -164,7 +167,7 @@ func newInbound(herdr domain.HerdrGateway, tg domain.TelegramGateway, topics *to
 	}
 	in := &inbound{
 		herdr: herdr, tg: tg, topics: topics, agents: agents, live: live, out: out,
-		git: svc.Git, inbox: svc.Inbox,
+		git: svc.Git, inbox: svc.Inbox, stt: svc.Stt,
 		opts: opts, panel: newPanel(opts, tg, log),
 		cfg: cfg, store: svc.Config, log: log,
 		chrome:  opts.PostsChrome,
@@ -901,6 +904,7 @@ const (
 	inboxFailedFmt  = "⚠️ download failed: %s"
 	inboxPartialFmt = "⚠️ %d of %d files failed: %s"
 	inboxGoneFmt    = "⚠️ agent has exited, file kept at %s"
+	voiceEchoFmt    = `🎙️ "%s"`
 	inboxNoStore    = "⚠️ inbox is not available in this build"
 	// albumPrefix marks the debouncer key of a media group.
 	albumPrefix = "album:"
@@ -925,9 +929,13 @@ type inboxResult struct {
 	messageID int
 	caption   string
 	paths     []string
-	failed    []string
-	total     int
-	started   time.Time
+	// transcripts are the words of the voice notes that were transcribed,
+	// voicePaths where those notes were saved; they are not in paths.
+	transcripts []string
+	voicePaths  []string
+	failed      []string
+	total       int
+	started     time.Time
 }
 
 // albumKey is the debouncer key for a media group.
@@ -1031,10 +1039,36 @@ func (i *inbound) startDownload(key domain.Key, threadID, messageID int, caption
 				r.failed = append(r.failed, failureReason(err))
 				continue
 			}
+			if text := i.transcribe(ctx, key, at, path); text != "" {
+				r.transcripts = append(r.transcripts, text)
+				r.voicePaths = append(r.voicePaths, path)
+				continue
+			}
 			r.paths = append(r.paths, path)
 		}
 		return r
 	})
+}
+
+// transcribe returns the words of a saved voice note, or "" when there is
+// no transcriber, the attachment is not a voice note, the transcription
+// failed or nothing was heard: the agent then gets the path as before.
+// It runs on the download goroutine.
+func (i *inbound) transcribe(ctx context.Context, key domain.Key, at domain.TopicAttachment, path string) string {
+	if i.stt == nil || at.Kind != domain.AttachmentVoice {
+		return ""
+	}
+	start := time.Now()
+	text, err := i.stt.Transcribe(ctx, path)
+	text = strings.TrimSpace(text)
+	if err != nil || text == "" {
+		i.log.Warn("voice note not transcribed, sending the path", slog.String("key", key.String()), slog.Int("message_id", at.MessageID),
+			slog.Bool("empty", err == nil), slog.Any("err", err), slog.Int64("dur_ms", time.Since(start).Milliseconds()))
+		return ""
+	}
+	i.log.Info("voice note transcribed", slog.String("key", key.String()), slog.Int("message_id", at.MessageID),
+		slog.Int("chars", len(text)), slog.Int64("dur_ms", time.Since(start).Milliseconds()))
+	return text
 }
 
 // fetch downloads one attachment and saves it to the inbox.
@@ -1065,21 +1099,33 @@ func (i *inbound) InboxFinished(ctx context.Context, r inboxResult) error {
 	}
 	msg := domain.TopicMessage{ThreadID: r.threadID, MessageID: r.messageID}
 	elapsed := i.clock.Now().Sub(r.started).Milliseconds()
-	if len(r.paths) == 0 {
+	if len(r.paths) == 0 && len(r.transcripts) == 0 {
 		i.log.Warn("inbox delivery failed", slog.String("key", r.key.String()), slog.Int("message_id", r.messageID), slog.Int("total", r.total), slog.Int64("elapsed_ms", elapsed))
 		return i.reply(ctx, r.threadID, r.messageID, fmt.Sprintf(inboxFailedFmt, r.failed[0]))
 	}
 	entry, hasTopic := i.topics.Entry(r.key)
 	if _, alive := i.agents(r.key); !alive || !hasTopic || !entry.Status.Live() {
 		i.log.Info("inbox delivery to exited agent", slog.String("key", r.key.String()), slog.Int("message_id", r.messageID))
-		return i.reply(ctx, r.threadID, r.messageID, fmt.Sprintf(inboxGoneFmt, strings.Join(r.paths, ", ")))
+		return i.reply(ctx, r.threadID, r.messageID, fmt.Sprintf(inboxGoneFmt, strings.Join(append(r.paths, r.voicePaths...), ", ")))
 	}
-	if err := i.herdr.Prompt(ctx, r.key.PaneID, domain.AttachmentPrompt(r.caption, r.paths)); err != nil {
+	// The words of a voice note go in as if typed, after the caption; the
+	// operator sees what was heard as a quoted reply.
+	text := strings.TrimSpace(strings.Join(append([]string{r.caption}, r.transcripts...), "\n\n"))
+	for _, t := range r.transcripts {
+		if err := i.reply(ctx, r.threadID, r.messageID, fmt.Sprintf(voiceEchoFmt, t)); err != nil {
+			return err
+		}
+	}
+	if err := i.herdr.Prompt(ctx, r.key.PaneID, domain.AttachmentPrompt(text, r.paths)); err != nil {
 		return i.failed(ctx, msg, r.key, "prompt", err)
 	}
 	i.log.Info("inbox delivered", slog.String("key", r.key.String()), slog.Int("message_id", r.messageID), slog.Int("saved", len(r.paths)),
-		slog.Int("failed", len(r.failed)), slog.Int64("elapsed_ms", elapsed))
-	i.deb.ScheduleAfter(submitKey(r.key.PaneID), inboxSubmitDelay)
+		slog.Int("transcribed", len(r.transcripts)), slog.Int("failed", len(r.failed)), slog.Int64("elapsed_ms", elapsed))
+	// Claude Code drops the enter of a paste with a path in it; a prompt of
+	// transcribed words alone is submitted like typed text.
+	if len(r.paths) > 0 {
+		i.deb.ScheduleAfter(submitKey(r.key.PaneID), inboxSubmitDelay)
+	}
 	if err := i.out.PromptSent(ctx, r.key, r.threadID, r.messageID); err != nil {
 		return err
 	}

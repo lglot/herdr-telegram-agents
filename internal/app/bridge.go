@@ -43,6 +43,9 @@ type Services struct {
 	Replies domain.ReplySource
 	Git     domain.GitRunner
 	Inbox   domain.InboxStore
+	// Stt transcribes voice notes into the prompt; nil prompts with the
+	// saved file's path, like any other attachment.
+	Stt domain.Transcriber
 	// Config saves config.json when /observers changes the observer list;
 	// nil refuses the change with a notice.
 	Config domain.ConfigStore

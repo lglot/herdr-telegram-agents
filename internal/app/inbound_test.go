@@ -1253,6 +1253,70 @@ func TestInboundAttachmentSavedAndPrompted(t *testing.T) {
 	}
 }
 
+// fakeTranscriber answers every voice note with text or err and records
+// the paths it was given.
+type fakeTranscriber struct {
+	text  string
+	err   error
+	paths []string
+}
+
+func (f *fakeTranscriber) Transcribe(_ context.Context, path string) (string, error) {
+	f.paths = append(f.paths, path)
+	return f.text, f.err
+}
+
+// voiceNote is a Telegram voice message: Ogg/Opus without a file name.
+func voiceNote(thread, id int, fileID, caption string) domain.TopicAttachment {
+	at := attachment(thread, id, domain.AttachmentVoice, fileID, "", caption, 8)
+	at.MIME = "audio/ogg"
+	return at
+}
+
+func TestInboundVoiceNoteIsTranscribed(t *testing.T) {
+	f := newBridgeFixture(t)
+	stt := &fakeTranscriber{text: "  controlla la release  "}
+	f.in.stt = stt
+	f.add(t, "p1", "t1", "reviewer", domain.StatusIdle)
+	f.tg.SetFile("v1", []byte("oggbytes"))
+	if err := f.in.HandleAttachment(f.ctx, voiceNote(101, 42, "v1", "")); err != nil {
+		t.Fatal(err)
+	}
+	if len(stt.paths) != 1 || stt.paths[0] != "/state/inbox/20260902-120000-42-voice.ogg" {
+		t.Fatalf("transcribed = %q", stt.paths)
+	}
+	if prompts := f.herdr.Prompts(); len(prompts) != 1 || prompts[0] != "p1: controlla la release" {
+		t.Fatalf("Prompts = %q", prompts)
+	}
+	assertCallsEqual(t, f.tg, "download:v1:20971520", `send:101:🎙️ "controlla la release":reply=42`)
+	// A text prompt is submitted by Herdr: no second enter is armed.
+	f.fireInboundAfter(t, inboxSubmitDelay, 0)
+	if n := len(f.herdr.Keys()); n != 0 {
+		t.Fatalf("enter sent after a transcript: %d", n)
+	}
+}
+
+func TestInboundVoiceNoteFallsBackToThePath(t *testing.T) {
+	for name, stt := range map[string]*fakeTranscriber{
+		"transcription failed": {err: errors.New("whisper-cli: exit status 1")},
+		"nothing heard":        {text: " \n "},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newBridgeFixture(t)
+			f.in.stt = stt
+			f.add(t, "p1", "t1", "reviewer", domain.StatusIdle)
+			f.tg.SetFile("v1", []byte("oggbytes"))
+			if err := f.in.HandleAttachment(f.ctx, voiceNote(101, 42, "v1", "listen")); err != nil {
+				t.Fatal(err)
+			}
+			if prompts := f.herdr.Prompts(); len(prompts) != 1 || prompts[0] != "p1: listen\n\n/state/inbox/20260902-120000-42-voice.ogg" {
+				t.Fatalf("Prompts = %q", prompts)
+			}
+			assertCallsEqual(t, f.tg, "download:v1:20971520")
+		})
+	}
+}
+
 func TestInboundAttachmentSubmitSkipsAnOpenDialog(t *testing.T) {
 	f := newBridgeFixture(t)
 	f.add(t, "p1", "t1", "reviewer", domain.StatusIdle)
