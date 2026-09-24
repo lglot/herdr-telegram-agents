@@ -15,6 +15,10 @@ const (
 	chromeStatus = "  …/Projects/My/herdr_tg │ main ✓ │ 14%: 121k[▓░░░░░░░░░]713k │ $4.37 │ 5h 3%[░░░░░░░░░░]4h19m │ 7d 14%[▓░░░░░░░░░]5d10h           /rc"
 	chromeHint   = "  ⏵⏵ auto mode on (shift+tab to cycle) · ← 2 agents"
 	transcript   = "⏺ Done. The tests pass.\n\n  Ran 2 shell commands"
+	// chromeNamedRule and chromeUpdate were read on 2026-09-24 from a pane
+	// whose session has a name, rule shortened.
+	chromeNamedRule = "──────────────────────────────── pi-session-reply-reader ─"
+	chromeUpdate    = "                                         ✔ Update installed · Restart to apply"
 )
 
 func frame(status, hint string) string {
@@ -40,6 +44,12 @@ func TestCutChrome(t *testing.T) {
 		{"status line alone is transcript", transcript + "\n" + chromeStatus, transcript + "\n" + chromeStatus, 0},
 		{"box without status or hint", transcript + "\n" + chromeRule + "\n❯\n" + chromeRule, transcript, 3},
 		{"short rule is not the box", transcript + "\n───\n❯\n───\n" + chromeHint, transcript + "\n───\n❯\n───", 1},
+		// Read from a pane of a named session on 2026-09-24: the top rule
+		// carries the session name and an update notice sits above the box.
+		{"named session with update notice", transcript + "\n" + chromeUpdate + "\n" + chromeNamedRule + "\n❯\n" + chromeRule + "\n" + chromeHint, transcript, 5},
+		{"named session", transcript + "\n" + chromeNamedRule + "\n❯\n" + chromeRule, transcript, 3},
+		{"update notice without the box is transcript", transcript + "\n" + chromeUpdate, transcript + "\n" + chromeUpdate, 0},
+		{"text inside a rule is not the named rule", transcript + "\n──────── note ────────\n❯\n" + chromeRule, transcript + "\n──────── note ────────\n❯\n" + chromeRule, 0},
 		{"empty", "", "", 0},
 		{"trailing blank lines after the hint", transcript + "\n" + frame(chromeStatus, chromeHint) + "\n  \n\n", transcript, 5},
 		{"trailing spaces on the frame lines", transcript + "\n" + chromeRule + "  \n❯   \n" + chromeRule + " \n" + chromeStatus + " \n" + chromeHint + "  ", transcript, 5},

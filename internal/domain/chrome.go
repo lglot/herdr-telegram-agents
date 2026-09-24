@@ -34,6 +34,13 @@ const (
 	// chromeStatusSeparators is how many " │ " (or " | ") a line needs to
 	// count as the status line.
 	chromeStatusSeparators = 2
+	// chromeNameTail ends the top rule of a named session: Claude Code
+	// draws the name right-aligned in it, "──── <name> ─" (2026-09-24).
+	chromeNameTail = " ─"
+	// chromeUpdateTail ends the notice Claude Code draws right above the
+	// box once an update is installed ("✔ Update installed · Restart to
+	// apply", 2026-09-24).
+	chromeUpdateTail = "· Restart to apply"
 )
 
 // chromeHintPrefixes start the mode hints Claude Code draws under the
@@ -76,6 +83,9 @@ func CutChrome(text string) (string, int) {
 	switch {
 	case box:
 		cut = boxTop - 3
+		if cut > 0 && strings.HasSuffix(strings.TrimSpace(lines[cut-1]), chromeUpdateTail) {
+			cut--
+		}
 	case status && hints > 0:
 		cut = boxTop
 	}
@@ -87,12 +97,23 @@ func CutChrome(text string) (string, int) {
 }
 
 // isChromeBox reports whether the three lines ending right before end are
-// a rule, the bare prompt row and a rule.
+// a rule (the top one may carry the session name), the bare prompt row and
+// a rule.
 func isChromeBox(lines []string, end int) bool {
 	if end < 3 {
 		return false
 	}
-	return isChromeRule(lines[end-3]) && isChromePromptRow(lines[end-2]) && isChromeRule(lines[end-1])
+	top := isChromeRule(lines[end-3]) || isChromeNamedRule(lines[end-3])
+	return top && isChromePromptRow(lines[end-2]) && isChromeRule(lines[end-1])
+}
+
+// isChromeNamedRule reports whether the line is the top rule of a named
+// session: a rule of at least chromeRuleMinRunes ─, a space, the name and
+// a single closing ─.
+func isChromeNamedRule(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	head, _, ok := strings.Cut(trimmed, " ")
+	return ok && isChromeRule(head) && strings.HasSuffix(trimmed, chromeNameTail) && !strings.HasSuffix(trimmed, "─"+chromeNameTail)
 }
 
 // isChromeHint reports whether the line is a mode hint of the frame.
