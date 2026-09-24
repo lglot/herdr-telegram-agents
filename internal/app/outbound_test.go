@@ -343,6 +343,28 @@ func TestOutboundScreenOnRequest(t *testing.T) {
 	}
 }
 
+func TestOutboundLastOnRequest(t *testing.T) {
+	// A turn that ended with the pane in view is idle, not done: /last
+	// still posts its reply, formatted, with the meta line.
+	f, a := metaFixture(t, domain.DoneFormatted)
+	f.setStatus(a, domain.StatusIdle)
+	if err := f.out.Last(f.ctx, a.Key); err != nil {
+		t.Fatal(err)
+	}
+	sent := f.tg.Sent()
+	if len(sent) != 1 || sent[0].Text != "Done. **All** tests pass." || !sent[0].Markdown || sent[0].Code || sent[0].Footer != metaLine || sent[0].Notify {
+		t.Fatalf("Sent = %+v", sent)
+	}
+	// Without a transcript the visible screen is posted instead.
+	f.replies.Fail(a.Key, domain.ErrNoReply)
+	if err := f.out.Last(f.ctx, a.Key); err != nil {
+		t.Fatal(err)
+	}
+	if sent := f.tg.Sent(); len(sent) != 2 || sent[1].Text != "recap: all tests pass" || !sent[1].Code {
+		t.Fatalf("fallback: Sent = %+v", sent)
+	}
+}
+
 func TestTrimScreen(t *testing.T) {
 	tests := []struct{ in, want string }{
 		{"", ""},

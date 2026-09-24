@@ -30,6 +30,7 @@ func TestParseCommand(t *testing.T) {
 		{"keys", "/keys esc enter", "herdr_bot", domain.Command{Kind: domain.CmdKeys, Keys: []string{"esc", "enter"}}},
 		{"keys without list", "/keys", "herdr_bot", domain.Command{Kind: domain.CmdUnknown, Text: "/keys"}},
 		{"focus", "/focus", "herdr_bot", domain.Command{Kind: domain.CmdFocus}},
+		{"last", "/last", "herdr_bot", domain.Command{Kind: domain.CmdLast}},
 		{"status", "/status", "herdr_bot", domain.Command{Kind: domain.CmdStatus}},
 		{"help", "/help", "herdr_bot", domain.Command{Kind: domain.CmdHelp}},
 		{"options", "/options", "herdr_bot", domain.Command{Kind: domain.CmdOptions}},

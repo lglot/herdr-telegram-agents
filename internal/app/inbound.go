@@ -18,6 +18,7 @@ import (
 // helpText is the command list shown by /help in a topic and in General.
 const helpText = `Commands
 /screen [N|all]: post the agent screen: the whole visible screen, its last N lines, or with "all" everything since your last message
+/last: post the agent's last reply, also when the turn ended with its pane in view and was not posted
 /keys k1 k2 ...: send raw keys to the agent (esc, enter, y, 1 ...)
 /focus: bring the agent's pane to the front in Herdr
 /git status | diff [staged] | log [N]: git in the agent's directory; long output arrives as a file
@@ -278,6 +279,11 @@ func (i *inbound) HandleTopic(ctx context.Context, msg domain.TopicMessage) erro
 		}
 		if err != nil {
 			return i.failed(ctx, msg, key, "screen", err)
+		}
+		return nil
+	case domain.CmdLast:
+		if err := i.out.Last(ctx, key); err != nil {
+			return i.failed(ctx, msg, key, "last", err)
 		}
 		return nil
 	case domain.CmdStatus:

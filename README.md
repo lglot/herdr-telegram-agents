@@ -132,6 +132,7 @@ its tail silently. Anything you write in the agent's topic goes back:
 | `y`, `n`, `1`..`9`, `enter`, `esc` while the agent is blocked | the matching key; a button under the question does the same |
 | `/keys esc enter` | raw key names |
 | `/screen`, `/screen 40`, `/screen all` | the visible screen, its last 40 lines, or everything since your last message |
+| `/last` | the agent's last reply from its transcript, also for a turn that ended with its pane in view (Herdr reports it idle, not done, so it is not posted); the screen when there is no transcript |
 | `/focus` | the pane is brought to the front in Herdr |
 | `/git status`, `/git diff`, `/git diff staged`, `/git log 5` | git run in the agent's directory; long output arrives as a `.patch` or `.txt` file |
 | a photo, file, voice note, audio or video | saved under the plugin's state dir and the agent gets the caption plus the absolute path; an album becomes one prompt |

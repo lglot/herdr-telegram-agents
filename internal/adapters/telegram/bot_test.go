@@ -176,8 +176,8 @@ func TestRegisterCommands(t *testing.T) {
 			t.Errorf("commands lack %s: %s", name, cmds)
 		}
 	}
-	if n := strings.Count(cmds, `"command":`); n != 18 {
-		t.Errorf("commands count = %d, want 18: %s", n, cmds)
+	if n := strings.Count(cmds, `"command":`); n != 19 {
+		t.Errorf("commands count = %d, want 19: %s", n, cmds)
 	}
 	if scope := f.Get("scope"); !strings.Contains(scope, `"type":"chat"`) || !strings.Contains(scope, `"chat_id":-1001234567890`) {
 		t.Errorf("scope = %q", scope)

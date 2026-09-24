@@ -19,6 +19,8 @@ const (
 	// screen, otherwise the last Lines lines; All means the output since
 	// the last human message.
 	CmdScreen CommandKind = "screen"
+	// CmdLast posts the agent's last reply from its transcript (topic only).
+	CmdLast CommandKind = "last"
 	// CmdFocus brings the agent's pane to the front in Herdr.
 	CmdFocus CommandKind = "focus"
 	// CmdStatus answers with the agent status (topic) or a summary of every
@@ -422,6 +424,8 @@ func ParseCommand(text, botUsername string) Command {
 		return Command{Kind: CmdKeys, Keys: append([]string(nil), args...)}
 	case "focus":
 		return Command{Kind: CmdFocus}
+	case "last":
+		return Command{Kind: CmdLast}
 	case "status":
 		return Command{Kind: CmdStatus}
 	case "help":

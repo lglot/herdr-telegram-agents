@@ -1310,6 +1310,42 @@ func (o *outbound) Screen(ctx context.Context, key domain.Key, lines int) error 
 	return nil
 }
 
+// Last posts the agent's last reply from its transcript on request. A turn
+// that ends while its pane is in view goes from working to idle, never
+// done, so Fire never posts it; /last fetches it. The reply is rendered
+// like a done post (code in reply mode, formatted otherwise) with the meta
+// line when posts.meta is on; without a transcript the visible screen is
+// posted instead. Errors are returned so the caller can tell the operator.
+func (o *outbound) Last(ctx context.Context, key domain.Key) error {
+	entry, ok := o.topics.Entry(key)
+	if !ok {
+		return fmt.Errorf("last for %s: no topic", key)
+	}
+	agent, ok := o.agents(key)
+	if !ok || o.replies == nil {
+		return o.Screen(ctx, key, 0)
+	}
+	r, err := o.replies.LastReply(ctx, agent)
+	text := strings.TrimSpace(r.Text)
+	if err != nil || text == "" {
+		o.log.Info("reply source unavailable", slog.String("key", key.String()), slog.String("mode", "last"), slog.Any("err", err))
+		return o.Screen(ctx, key, 0)
+	}
+	formatted := o.doneMode() != domain.DoneReply
+	out := domain.Outgoing{ThreadID: entry.ThreadID, Text: text, Code: !formatted, Markdown: formatted, MaxParts: replyMaxParts, Fold: o.fold()}
+	if o.meta() {
+		out.Footer = r.Meta.Line()
+	}
+	id, err := o.tg.Send(ctx, out)
+	if err != nil {
+		return err
+	}
+	o.log.Info("reply posted", slog.String("key", key.String()), slog.Int("thread_id", entry.ThreadID),
+		slog.String("mode", "last"), slog.Int("lines", strings.Count(text, "\n")+1), slog.Int("bytes", len(text)),
+		slog.String("source", r.Source), slog.Int("message_id", id))
+	return nil
+}
+
 // ScreenAll posts what the agent printed since the last human message: the
 // captured history after its mark plus the current screen. Short output is
 // sent as code messages like Screen; longer output goes out as one .txt
