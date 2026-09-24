@@ -3,9 +3,10 @@
 // not tell which session a pane runs, so the reader finds the transcript by
 // the pane's working directory: Claude Code keeps one directory per
 // project under ~/.claude/projects and one .jsonl per session, and the
-// newest file is the session that just finished. Two Claude panes in the
-// same directory cannot be told apart; that limitation is documented and
-// the caller falls back to the screen whenever the reader is unsure.
+// newest file is the session that just finished. Pi does the same under
+// ~/.pi/agent/sessions. Two panes of the same agent in the same directory
+// cannot be told apart; that limitation is documented and the caller
+// falls back to the screen whenever the reader is unsure.
 package transcript
 
 import (
@@ -22,7 +23,7 @@ import (
 )
 
 const (
-	// kindClaude is the Herdr agent kind this reader understands.
+	// kindClaude is the Herdr agent kind of Claude Code.
 	kindClaude = "claude"
 	// transcriptSuffix is the extension of Claude Code session files.
 	transcriptSuffix = ".jsonl"
@@ -35,7 +36,7 @@ const (
 // projectsDir is Claude Code's transcript root, relative to the home.
 var projectsDir = []string{".claude", "projects"}
 
-// Reader implements domain.ReplySource for Claude Code transcripts.
+// Reader implements domain.ReplySource for Claude Code and Pi transcripts.
 type Reader struct {
 	home    func() (string, error)
 	now     func() time.Time
@@ -65,7 +66,12 @@ func (r *Reader) LastReply(ctx context.Context, agent domain.Agent) (domain.Repl
 	if err := ctx.Err(); err != nil {
 		return domain.Reply{}, err
 	}
-	if agent.Kind != kindClaude {
+	root, slug, scan := projectsDir, projectSlug, lastReplyIn
+	switch agent.Kind {
+	case kindClaude:
+	case kindPi:
+		root, slug, scan = piSessionsDir, piSlug, lastPiReplyIn
+	default:
 		return domain.Reply{}, fmt.Errorf("%w: unsupported agent %q", domain.ErrNoReply, agent.Kind)
 	}
 	if strings.TrimSpace(agent.Cwd) == "" {
@@ -75,7 +81,7 @@ func (r *Reader) LastReply(ctx context.Context, agent domain.Agent) (domain.Repl
 	if err != nil {
 		return domain.Reply{}, fmt.Errorf("%w: home directory: %v", domain.ErrNoReply, err)
 	}
-	dir := filepath.Join(append([]string{home}, append(projectsDir, projectSlug(agent.Cwd))...)...)
+	dir := filepath.Join(append([]string{home}, append(root, slug(agent.Cwd))...)...)
 	path, modTime, candidates, err := newestTranscript(dir)
 	if err != nil {
 		return domain.Reply{}, err
@@ -84,7 +90,7 @@ func (r *Reader) LastReply(ctx context.Context, agent domain.Agent) (domain.Repl
 	r.log.Debug("transcript lookup",
 		slog.String("pane", agent.PaneID), slog.String("cwd", agent.Cwd), slog.String("dir", dir),
 		slog.Int("candidates", candidates), slog.String("chosen", filepath.Base(path)), slog.Int64("age_ms", age.Milliseconds()))
-	text, turn, stats, err := lastReplyIn(path, r.maxScan)
+	text, turn, stats, err := scan(path, r.maxScan)
 	meta := turn.meta()
 	turnDuration, _ := meta.Duration()
 	r.log.Debug("transcript scanned",

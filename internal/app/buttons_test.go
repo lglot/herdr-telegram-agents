@@ -128,6 +128,30 @@ func TestOutboundPressSendsDigitAndMarksButton(t *testing.T) {
 	}
 }
 
+// piDialog is Pi's ask_user overlay reduced to its list column: a digit
+// only moves the → selection there, enter answers.
+const piDialog = `    │ → 1. Yes                  │ preview │
+    │   2. No                   │         │
+    │  ↑↓ navigate • enter select         │
+    ╰─────────────────────────────────────╯`
+
+func TestOutboundPressConfirmsPiDialog(t *testing.T) {
+	f := newBridgeFixture(t)
+	blockedWithDialog(t, f, piDialog)
+	want := []domain.Button{{Text: "1️⃣ Yes", Data: "1"}, {Text: "2️⃣ No", Data: "2"}}
+	if sent := f.tg.Sent(); len(sent) != 1 || !reflect.DeepEqual(sent[0].Buttons, want) {
+		t.Fatalf("Sent = %+v", sent)
+	}
+	f.tg.Reset()
+	if err := f.out.Press(f.ctx, press(101, 1000, "2")); err != nil {
+		t.Fatal(err)
+	}
+	if keys := f.herdr.Keys(); len(keys) != 1 || !reflect.DeepEqual(keys[0], testkit.KeysCall{Target: "p1", Keys: []string{"2", domain.KeyEnter}}) {
+		t.Fatalf("Keys = %+v", keys)
+	}
+	assertCallsEqual(t, f.tg, "buttons:1000:✅ 2 · No", "answer:cb1:sent: 2")
+}
+
 func TestOutboundPressRetiredMessageIsStale(t *testing.T) {
 	f := newBridgeFixture(t)
 	blockedWithDialog(t, f, dialogScreen)

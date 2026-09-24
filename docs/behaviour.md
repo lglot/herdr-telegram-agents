@@ -140,6 +140,12 @@ at DEBUG without screen text; a final failed read produces one WARN.
   default) the status line and the mode hint Claude Code draws under the
   dialog are cut from the post; the dialog's own lines never are, so the
   buttons are found as before.
+- Pi's `ask_user` question (the `pi-ask-user` extension) is drawn in a box
+  above Pi's editor, not at the bottom of the screen; its numbered options
+  get the same buttons. A digit there only moves the `→` selection, so a
+  press sends the digit and then `enter`. Its free-text row has no number
+  and gets no button, and a multi-select `ask_user` gets no buttons: answer
+  those in Herdr, or reply with the digit and then `enter`.
 - Pressing ✏️ sends that entry's number, turns the keyboard into `✏️ waiting
   for your text`, answers `now send the text` and posts a quoted `✏️ Type
   something: send the text as your next message` with Telegram's
@@ -220,7 +226,9 @@ the `Done post` option of the Posts group:
   `~/.claude/projects/<cwd with every non-alphanumeric character as "-">/`
   and reads the newest `.jsonl` there from the end: the last text the agent
   wrote after your last prompt, skipping tool calls, tool results and
-  subagent traffic. The text is posted as a code block, so Markdown shows as
+  subagent traffic. A Pi pane is read the same way from Pi's session file,
+  `~/.pi/agent/sessions/--<cwd without the leading "/", every "/", "\" and
+  ":" as "-">--/`. The text is posted as a code block, so Markdown shows as
   the agent typed it.
 - **Formatted**: the same reply rendered for Telegram: headings become bold,
   `- ` lists become `•`, quotes get a bar, `[text](url)` becomes a link,
@@ -259,10 +267,11 @@ reply as the agent wrote it, before rendering and before the phone wraps
 them: a list of 25 short items folds, three long paragraphs do not. `Off`
 never folds. `Screen` posts are never folded, whatever the option says.
 
-Limits worth knowing: two Claude Code panes in the same directory cannot be
-told apart, so the reply of the one that wrote last wins (the stale check
-above catches the case where the other pane wrote before this turn began);
-other agents (Codex, Pi, OpenCode) always get the screen; when no
+Limits worth knowing: two Claude Code (or two Pi) panes in the same
+directory cannot be told apart, so the reply of the one that wrote last
+wins (the stale check above catches the case where the other pane wrote
+before this turn began); Pi gets the reply but no summary line; other
+agents (Codex, OpenCode, ...) always get the screen; when no
 transcript or no text is found the daemon posts the screen and logs
 `reply source unavailable` with the reason. Blocked posts and `/screen` are
 never affected: the dialog with its buttons exists only on the screen, and

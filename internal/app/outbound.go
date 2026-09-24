@@ -124,6 +124,8 @@ type keyboard struct {
 	cursor    int
 	submitRow int
 	waiting   bool
+	// confirm sends enter after an option digit (domain.Dialog.Confirm).
+	confirm bool
 }
 
 // typingWait is an open ✏️ wait: the next plain message in the topic is
@@ -668,7 +670,7 @@ func (o *outbound) fire(ctx context.Context, key domain.Key, force bool) error {
 	o.lastPosted[key] = hash
 	if len(out.Buttons) > 0 {
 		o.keyboards[key] = keyboard{messageID: id, choices: dialog.Choices, multi: dialog.Multi, textEntry: dialog.TextEntry, textLabel: dialog.TextLabel,
-			cursor: dialog.Cursor, submitRow: dialog.SubmitRow}
+			cursor: dialog.Cursor, submitRow: dialog.SubmitRow, confirm: dialog.Confirm}
 	}
 	switch {
 	case paged:
@@ -1134,6 +1136,10 @@ func (o *outbound) Press(ctx context.Context, ev domain.ButtonPressed) error {
 		keys = []string{strconv.Itoa(n)}
 	case pressSubmit:
 		keys = o.submitKeys(ctx, key, kb)
+	case pressDigit:
+		if kb.confirm {
+			keys = append(keys, domain.KeyEnter)
+		}
 	}
 	if err := o.herdr.SendKeys(ctx, key.PaneID, keys); err != nil {
 		o.log.Warn("button send_keys failed", slog.String("key", key.String()), slog.String("data", ev.Data), slog.String("err", err.Error()))

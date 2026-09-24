@@ -50,6 +50,9 @@ type Dialog struct {
 	// when the renderer submits on enter.
 	Cursor    int
 	SubmitRow int
+	// Confirm is set when a digit only moves the selection and enter
+	// answers (Pi's ask_user); a Claude Code digit answers on its own.
+	Confirm bool
 }
 
 // Key names Herdr accepts for the arrows and enter.
@@ -114,6 +117,72 @@ var checkboxGlyph = regexp.MustCompile(`^(?:\[[^\[\]\s]{1,2}\]|\[ \]|[☐☑☒]
 // puts before the highlighted option.
 var choiceItem = regexp.MustCompile(`^\s*(?:❯\s*)?([1-9])\.\s+(\S.*)$`)
 
+// askUserItem matches "1. Label" in the list column of Pi's ask_user
+// overlay, with the optional → pointer on the selected option.
+var askUserItem = regexp.MustCompile(`^\s*(?:→\s*)?([1-9])\.\s+(\S.*)$`)
+
+// askUserHint is part of the key hints pi-ask-user (0.15.1) draws under
+// its option list; a boxed list without it is not taken for the dialog.
+const askUserHint = "↑↓ navigate"
+
+// parseAskUser reads the single-select dialog of Pi's ask_user tool
+// (pi-ask-user 0.15.1, measured 2026-09-23). It is an overlay drawn in a
+// box: every row is "<transcript>│ <list> │ <preview> │" (the preview
+// column only on a wide pane), the options are numbered in the list
+// column, and the editor and status line stay below the box, so the
+// dialog is not at the bottom of the screen. The transcript showing
+// through on the left may hold a │ of its own, so the box's left edge is
+// taken from the column of its bottom corner (╰). A digit there only
+// moves the selection, so the dialog has Confirm set. The free-text row
+// carries no number and gets no button; a multi-select list (checkboxes)
+// gives the zero Dialog, as does a list without the key hints under it.
+func parseAskUser(lines []string) Dialog {
+	bottom, left := -1, 0
+	for i := len(lines) - 1; i >= 0; i-- {
+		if j := strings.Index(lines[i], "╰─"); j >= 0 {
+			bottom, left = i, utf8.RuneCountInString(lines[i][:j])
+			break
+		}
+	}
+	if bottom < 0 {
+		return Dialog{}
+	}
+	var items []Choice
+	hint := false
+	for _, line := range lines[:bottom] {
+		row := []rune(line)
+		if len(row) <= left || row[left] != '│' {
+			continue
+		}
+		cell, _, _ := strings.Cut(string(row[left+1:]), "│")
+		if strings.Contains(cell, askUserHint) {
+			hint = true
+			continue
+		}
+		m := askUserItem.FindStringSubmatch(strings.TrimRight(cell, " "))
+		if m == nil {
+			continue
+		}
+		n, _ := strconv.Atoi(m[1])
+		if n == 1 {
+			items = items[:0]
+		}
+		if n != len(items)+1 {
+			return Dialog{}
+		}
+		items = append(items, Choice{Number: n, Label: strings.TrimSpace(m[2])})
+	}
+	if !hint || len(items) < minChoices || len(items) > MaxChoiceButtons {
+		return Dialog{}
+	}
+	for _, c := range items {
+		if hasCheckbox(c.Label) {
+			return Dialog{}
+		}
+	}
+	return Dialog{Choices: items, Confirm: true}
+}
+
 // ParseChoices returns the real options of ParseDialog; kept for callers
 // that need nothing but the buttons.
 func ParseChoices(screen string) []Choice {
@@ -134,6 +203,9 @@ func ParseChoices(screen string) []Choice {
 // the agent shows; the free-text entry's number is kept as TextEntry.
 func ParseDialog(screen string) Dialog {
 	lines := strings.Split(strings.ReplaceAll(screen, "\r\n", "\n"), "\n")
+	if d := parseAskUser(lines); len(d.Choices) > 0 {
+		return d
+	}
 	start := -1
 	for i := len(lines) - 1; i >= 0; i-- {
 		if n, _, ok := parseChoiceLine(lines[i]); ok && n == 1 {

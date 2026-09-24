@@ -1,0 +1,5 @@
+{"type":"session","version":3,"id":"01a0b1e6-332d-77da-a938-71982aeb6e01","timestamp":"2026-09-18T00:24:08.750Z","cwd":"/Users/op/Projects/demo"}
+{"type":"message","id":"1897bc95","parentId":null,"timestamp":"2026-09-18T00:24:09.000Z","message":{"role":"user","content":[{"type":"text","text":"do it"}]}}
+{"type":"message","id":"2a01bc95","parentId":"1897bc95","timestamp":"2026-09-18T00:24:10.000Z","message":{"role":"assistant","content":[{"type":"text","text":"Working on it."},{"type":"toolCall","id":"call_1","name":"bash","arguments":{"command":"ls"}}],"stopReason":"toolUse"}}
+{"type":"message","id":"3b02bc95","parentId":"2a01bc95","timestamp":"2026-09-18T00:24:11.000Z","message":{"role":"toolResult","toolCallId":"call_1","toolName":"bash","content":[{"type":"text","text":"out"}],"isError":false}}
+{"type":"message","id":"4c03bc95","parentId":"3b02bc95","timestamp":"2026-09-18T00:24:12.000Z","message":{"role":"assistant","content":[{"type":"toolCall","id":"call_2","name":"bash","arguments":{"command":"pwd"}}],"stopReason":"aborted"}}

@@ -56,6 +56,34 @@ const measuredMultiDialog = `  Ran 1 shell command
 
 Enter to select · ↑/↓ to navigate · Esc to cancel`
 
+// measuredPiDialog is the bottom of a Pi pane blocked on the ask_user tool
+// (pi-ask-user 0.15.1), read from Herdr's detection region on 2026-09-23
+// (trailing spaces removed, the status line dropped): the options sit in
+// the left column of an overlay whose left edge the transcript shows
+// through, the → cursor marks the selection and the editor stays below.
+const measuredPiDialog = ` Log│ → 1. Lo screen, come oggi          │                                                  │
+    │   2. Screen con nota di ripiego    │ Fallback invariato: se non c'è testo nella       │
+ Dim│   3. Niente, salta il post         │ risposta, il plugin posta lo screen dello stato  │
+ dif│   4. Testo segnaposto              │ del pane. Le 20 sessioni su 121 continuano a     │
+    │     Type something. — Enter a      │ postare screen.                                  │
+Ran │     custom response                │                                                  │
+    │                                    │ …                                                │
+    │  type filter • PgUp/PgDn prompt • backspace erase • ↑↓ navigate • alt+o hide • enter  │
+ mos│   select • esc clear/cancel • ctrl+c cancel                                           │
+    ╰───────────────────────────────────────────────────────────────────────────── v0.15.1 ─╯
+◆ read ~/.agents/skills/diffweb/SKILL.md:1-1119 {77 lines}
+
+ mi fai un domanda di test?
+
+◇ ask_user Sul comportamento atteso dell'adapter Pi: quando un…
+
+ ⠏ Working
+
+─────────────────────────────────────────────────────────────────────────────────────────────────
+
+─────────────────────────────────────────────────────────────────────────────────────────────────
+ ↳ mi fai un domanda di test?`
+
 func TestParseDialog(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -82,6 +110,16 @@ func TestParseDialog(t *testing.T) {
 			domain.Dialog{Choices: []domain.Choice{{1, "A"}, {2, "B"}}, TextEntry: 3, TextLabel: "Chat about this"}},
 		{"type something wins over chat", "  1. A\n  2. Chat about this\n  3. B\n  4. Type something.\n",
 			domain.Dialog{Choices: []domain.Choice{{1, "A"}, {3, "B"}}, TextEntry: 4, TextLabel: "Type something"}},
+		{"measured pi ask_user", measuredPiDialog,
+			domain.Dialog{Choices: []domain.Choice{{1, "Lo screen, come oggi"}, {2, "Screen con nota di ripiego"}, {3, "Niente, salta il post"}, {4, "Testo segnaposto"}}, Confirm: true}},
+		{"pi ask_user without the split preview", "    │ → 1. Yes                │\n    │   2. No                 │\n    │  ↑↓ navigate • enter select │\n    ╰───────────────────────────╯\n",
+			domain.Dialog{Choices: []domain.Choice{{1, "Yes"}, {2, "No"}}, Confirm: true}},
+		// Seen live 2026-09-23: the transcript under the overlay had a │ of
+		// its own left of the box.
+		{"pi ask_user over a boxed transcript", "│  ~│ → 1. Yes │ 1. preview │\n│   │   2. No  │ 2. list    │\n│   │  ↑↓ navigate • enter select │\n│  -╰──────────────────────────╯\n",
+			domain.Dialog{Choices: []domain.Choice{{1, "Yes"}, {2, "No"}}, Confirm: true}},
+		{"pi ask_user multi-select is left to the keyboard", "│ → 1. [ ] A │\n│   2. [✓] B │\n│  ↑↓ navigate • space toggle │\n╰────────────╯\n", domain.Dialog{}},
+		{"boxed list without the ask_user hint", "│ 1. A │\n│ 2. B │\n╰──────╯\n", domain.Dialog{}},
 		{"only service items", "  1. Type something.\n  2. Chat about this\n", domain.Dialog{}},
 		{"no dialog", "just text\n❯ ", domain.Dialog{}},
 	}

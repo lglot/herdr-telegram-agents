@@ -1,0 +1,9 @@
+{"type":"session","version":3,"id":"01a0b1e6-332d-77da-a938-71982aeb6e02","timestamp":"2026-09-18T00:24:08.750Z","cwd":"/Users/op/Projects/demo"}
+{"type":"message","id":"1897bc95","parentId":null,"timestamp":"2026-09-18T00:24:09.000Z","message":{"role":"user","content":"run the helpers"}}
+{"type":"message","id":"2a01bc95","parentId":"1897bc95","timestamp":"2026-09-18T00:24:10.000Z","message":{"role":"assistant","content":[{"type":"toolCall","id":"call_1","name":"subagent","arguments":{"task":"look"}}],"stopReason":"toolUse"}}
+{"type":"message","id":"3b02bc95","parentId":"2a01bc95","timestamp":"2026-09-18T00:24:11.000Z","message":{"role":"toolResult","toolCallId":"call_1","toolName":"subagent","content":[{"type":"text","text":"started"}],"isError":false}}
+{"type":"custom_message","id":"4c03bc95","parentId":"3b02bc95","timestamp":"2026-09-18T00:24:20.000Z","customType":"subagent-notify","content":"Background task done","display":true}
+not json
+{"type":"thinking_level_change","id":"5d04bc95","parentId":"4c03bc95","timestamp":"2026-09-18T00:24:21.000Z","thinkingLevel":"high"}
+{"type":"message","id":"6e05bc95","parentId":"5d04bc95","timestamp":"2026-09-18T00:24:22.000Z","message":{"role":"assistant","content":[{"type":"text","text":"Noisy final"}],"stopReason":"stop"}}
+{"type":"custom","id":"7f06bc95","parentId":"6e05bc95","timestamp":"2026-09-18T00:24:23.000Z","customType":"compact-transcript-summary","data":{}}

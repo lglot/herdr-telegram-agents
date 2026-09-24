@@ -1,0 +1,6 @@
+{"type":"session","version":3,"id":"01a0b1e6-332d-77da-a938-71982aeb6e00","timestamp":"2026-09-18T00:24:08.750Z","cwd":"/Users/op/Projects/demo"}
+{"type":"model_change","id":"bbfef22f","parentId":null,"timestamp":"2026-09-18T00:24:08.751Z","provider":"openrouter","modelId":"demo/model"}
+{"type":"message","id":"1897bc95","parentId":"bbfef22f","timestamp":"2026-09-18T00:24:09.000Z","message":{"role":"user","content":[{"type":"text","text":"first"}],"timestamp":1789691049000}}
+{"type":"message","id":"2a01bc95","parentId":"1897bc95","timestamp":"2026-09-18T00:24:10.000Z","message":{"role":"assistant","content":[{"type":"text","text":"Old answer."}],"stopReason":"stop","timestamp":1789691050000}}
+{"type":"message","id":"3b02bc95","parentId":"2a01bc95","timestamp":"2026-09-18T00:25:00.000Z","message":{"role":"user","content":[{"type":"text","text":"second"}],"timestamp":1789691100000}}
+{"type":"message","id":"4c03bc95","parentId":"3b02bc95","timestamp":"2026-09-18T00:25:05.000Z","message":{"role":"assistant","content":[{"type":"thinking","thinking":"hmm","thinkingSignature":"x"},{"type":"text","text":"Done: **all good**."}],"stopReason":"stop","timestamp":1789691105000}}
