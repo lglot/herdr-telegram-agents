@@ -111,6 +111,9 @@ type TurnMeta struct {
 // the screen.
 type ReplySource interface {
 	LastReply(ctx context.Context, agent Agent) (Reply, error)
+	// Recent returns a bounded, chronological excerpt of the session's
+	// human and assistant text, excluding tool output and thinking.
+	Recent(ctx context.Context, agent Agent) (string, error)
 }
 
 // Button is one inline button under a bot message. Text is what the
@@ -299,6 +302,8 @@ type Rendered struct {
 // screen from a done one.
 type Renderer interface {
 	Render(ctx context.Context, kind, screen string, blocked bool) (Rendered, error)
+	// Recap summarizes a redacted excerpt of the agent's session.
+	Recap(ctx context.Context, conversation string) (string, error)
 }
 
 // Rights is the bot's standing in the configured chat.

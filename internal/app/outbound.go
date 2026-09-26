@@ -1403,6 +1403,55 @@ func (o *outbound) Last(ctx context.Context, key domain.Key) error {
 	return nil
 }
 
+// Recap summarizes a bounded excerpt of the exact session Herdr identified.
+// It never sends an unredacted transcript to the cloud, even when Telegram
+// redaction is disabled.
+func (o *outbound) Recap(ctx context.Context, key domain.Key, replyTo int) error {
+	entry, ok := o.topics.Entry(key)
+	if !ok {
+		return fmt.Errorf("recap for %s: no topic", key)
+	}
+	answer := func(text string) error {
+		_, err := o.tg.Send(ctx, domain.Outgoing{ThreadID: entry.ThreadID, ReplyTo: replyTo, Text: text})
+		return err
+	}
+	if o.replies == nil || o.render == nil {
+		return answer("recap unavailable: session reader or cloud model is not configured")
+	}
+	agent, ok := o.agents(key)
+	if !ok {
+		return answer("recap unavailable: agent is no longer running")
+	}
+	conversation, err := o.replies.Recent(ctx, agent)
+	if err != nil || strings.TrimSpace(conversation) == "" {
+		o.log.Info("recap transcript unavailable", slog.String("key", key.String()), slog.Any("err", err))
+		return answer("recap unavailable: no identified session transcript for this agent")
+	}
+	if o.redact == nil {
+		return fmt.Errorf("recap for %s: redactor unavailable", key)
+	}
+	redacted, stats := o.redact.Redact(conversation)
+	if stats.Total() > 0 {
+		o.log.Debug("recap input redacted", slog.String("key", key.String()), slog.String("stats", stats.String()))
+	}
+	text, err := o.render.Recap(ctx, redacted)
+	if err != nil || strings.TrimSpace(text) == "" {
+		o.log.Warn("recap render failed", slog.String("key", key.String()), slog.Any("err", err))
+		return answer("recap unavailable: cloud model did not answer")
+	}
+	title := "Session recap"
+	if strings.HasPrefix(conversation, "[Older session messages omitted]") {
+		title = "Partial session recap"
+	}
+	id, err := o.tg.Send(ctx, domain.Outgoing{ThreadID: entry.ThreadID, ReplyTo: replyTo,
+		Text: title + "\n\n" + text, Markdown: true, MaxParts: replyMaxParts})
+	if err != nil {
+		return err
+	}
+	o.log.Info("recap posted", slog.String("key", key.String()), slog.Int("message_id", id), slog.Int("bytes", len(text)))
+	return nil
+}
+
 // ScreenAll posts what the agent printed since the last human message: the
 // captured history after its mark plus the current screen. Short output is
 // sent as code messages like Screen; longer output goes out as one .txt

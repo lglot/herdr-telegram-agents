@@ -21,6 +21,8 @@ const (
 	CmdScreen CommandKind = "screen"
 	// CmdLast posts the agent's last reply from its transcript (topic only).
 	CmdLast CommandKind = "last"
+	// CmdRecap summarizes recent messages from the agent's session (topic only).
+	CmdRecap CommandKind = "recap"
 	// CmdFocus brings the agent's pane to the front in Herdr.
 	CmdFocus CommandKind = "focus"
 	// CmdStatus answers with the agent status (topic) or a summary of every
@@ -426,6 +428,8 @@ func ParseCommand(text, botUsername string) Command {
 		return Command{Kind: CmdFocus}
 	case "last":
 		return Command{Kind: CmdLast}
+	case "recap":
+		return bareCommand(CmdRecap, word, args)
 	case "status":
 		return Command{Kind: CmdStatus}
 	case "help":

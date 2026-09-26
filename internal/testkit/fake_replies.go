@@ -15,6 +15,7 @@ type FakeReplies struct {
 	mu      sync.Mutex
 	now     func() time.Time
 	replies map[domain.Key]string
+	recent  map[domain.Key]string
 	metas   map[domain.Key]fakeMeta
 	errs    map[domain.Key]error
 	calls   []domain.Key
@@ -29,7 +30,7 @@ type fakeMeta struct {
 // NewFakeReplies returns an empty source; unscripted keys answer
 // domain.ErrNoReply.
 func NewFakeReplies() *FakeReplies {
-	return &FakeReplies{now: time.Now, replies: map[domain.Key]string{}, metas: map[domain.Key]fakeMeta{}, errs: map[domain.Key]error{}}
+	return &FakeReplies{now: time.Now, replies: map[domain.Key]string{}, recent: map[domain.Key]string{}, metas: map[domain.Key]fakeMeta{}, errs: map[domain.Key]error{}}
 }
 
 // SetNow replaces the clock behind the default Written of a reply scripted
@@ -46,6 +47,14 @@ func (f *FakeReplies) Set(key domain.Key, text string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.replies[key] = text
+	delete(f.errs, key)
+}
+
+// SetRecent scripts the bounded session excerpt for /recap.
+func (f *FakeReplies) SetRecent(key domain.Key, text string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.recent[key] = text
 	delete(f.errs, key)
 }
 
@@ -91,4 +100,18 @@ func (f *FakeReplies) LastReply(_ context.Context, agent domain.Agent) (domain.R
 		return r, nil
 	}
 	return domain.Reply{}, fmt.Errorf("%w: not scripted for %s", domain.ErrNoReply, agent.Key)
+}
+
+// Recent implements domain.ReplySource.
+func (f *FakeReplies) Recent(_ context.Context, agent domain.Agent) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, agent.Key)
+	if err, ok := f.errs[agent.Key]; ok {
+		return "", err
+	}
+	if text, ok := f.recent[agent.Key]; ok {
+		return text, nil
+	}
+	return "", fmt.Errorf("%w: recent text not scripted for %s", domain.ErrNoReply, agent.Key)
 }

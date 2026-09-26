@@ -509,6 +509,16 @@ Proposed options are used only when the screen parser found none; each
 button is checked against the redacted screen before it can be sent. A
 missing setting, empty answer, error or 5 s timeout keeps the screen post.
 
+`/recap` in an agent topic summarizes the most recent 24 human and assistant
+text messages from the exact Claude Code or Pi session Herdr identified, up
+to 8,000 Unicode characters and a 4 MiB transcript scan. Tool output and thinking
+are excluded. Older content is marked as omitted; the summary must say when
+it is partial. The excerpt is always redacted before the cloud request,
+even when Telegram redaction is off. The command does not type into the
+agent. It needs `llm.json` and an identified session transcript; otherwise
+it replies that recap is unavailable. The cloud request has a 10 s timeout
+and a 600-token output cap.
+
 ## Topic cleanup
 
 Once a day, at daemon start and as soon as `Delete closed topics after`

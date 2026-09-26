@@ -116,6 +116,7 @@ func Poll(ctx context.Context, b *bot.Bot, log *slog.Logger) {
 var botCommands = []models.BotCommand{
 	{Command: "screen", Description: "Show the agent screen (N: last N lines, all: output since your last message)"},
 	{Command: "last", Description: "Post the agent's last reply (also a turn not posted because its pane was in view)"},
+	{Command: "recap", Description: "Summarize recent messages from this agent's session"},
 	{Command: "keys", Description: "Send raw keys to the agent, e.g. /keys esc"},
 	{Command: "focus", Description: "Bring the agent's pane to the front in Herdr"},
 	{Command: "git", Description: "git status | diff [staged] | log [N] in the agent's directory"},

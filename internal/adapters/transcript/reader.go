@@ -112,6 +112,26 @@ func (r *Reader) LastReply(ctx context.Context, agent domain.Agent) (domain.Repl
 	return domain.Reply{Text: text, Source: path, Age: age, Written: modTime, Meta: meta}, nil
 }
 
+// Recent returns a bounded excerpt of the current Claude Code or Pi
+// session. It can recap a turn while the agent is still working.
+func (r *Reader) Recent(ctx context.Context, agent domain.Agent) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	if agent.Kind != kindClaude && agent.Kind != kindPi {
+		return "", fmt.Errorf("%w: unsupported agent %q", domain.ErrNoReply, agent.Kind)
+	}
+	home, err := r.home()
+	if err != nil {
+		return "", fmt.Errorf("%w: home directory: %v", domain.ErrNoReply, err)
+	}
+	path, _ := sessionTranscript(home, agent)
+	if path == "" {
+		return "", fmt.Errorf("%w: Herdr did not identify this agent's session transcript", domain.ErrNoReply)
+	}
+	return recentIn(ctx, path, agent.Kind, r.maxScan)
+}
+
 // newestTranscript returns the most recently modified session file in dir
 // and how many candidates there were.
 func newestTranscript(dir string) (path string, modTime time.Time, candidates int, err error) {

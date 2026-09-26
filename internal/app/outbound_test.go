@@ -1876,6 +1876,7 @@ type fakeRenderer struct {
 	kind    string
 	screen  string
 	blocked bool
+	recap   string
 }
 
 func (f *fakeRenderer) Render(_ context.Context, kind, screen string, blocked bool) (domain.Rendered, error) {
@@ -1888,6 +1889,12 @@ func (f *fakeRenderer) Render(_ context.Context, kind, screen string, blocked bo
 		return domain.Rendered{}, f.err
 	}
 	return domain.Rendered{Text: f.text, Choices: f.choices}, nil
+}
+
+func (f *fakeRenderer) Recap(_ context.Context, conversation string) (string, error) {
+	f.calls++
+	f.recap = conversation
+	return f.text, f.err
 }
 
 // llmFixture returns a fixture with the rewrite switched on for blocked

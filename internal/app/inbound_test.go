@@ -258,6 +258,50 @@ func TestInboundScreenAll(t *testing.T) {
 	}
 }
 
+func TestInboundRecapRedactsSessionBeforeCloud(t *testing.T) {
+	f := newBridgeFixture(t)
+	a := f.add(t, "p1", "t1", "reviewer", domain.StatusIdle)
+	f.replies.SetRecent(a.Key, "user: token "+testBotToken+"\n\nassistant: work done")
+	if err := f.opts.Set(f.ctx, domain.OptionRedact, "false", 1); err != nil {
+		t.Fatal(err)
+	}
+	f.out.redact = domain.NewRedactor(testBotToken)
+	r := &fakeRenderer{text: "- Lavoro completato."}
+	f.out.render = r
+	if err := f.in.HandleTopic(f.ctx, topicMsg(101, 7, "/recap")); err != nil {
+		t.Fatal(err)
+	}
+	if r.calls != 1 || !strings.Contains(r.recap, "[redacted]") || strings.Contains(r.recap, testBotToken) {
+		t.Fatalf("cloud input was not redacted: calls=%d", r.calls)
+	}
+	sent := f.tg.Sent()
+	if len(sent) != 1 || sent[0].Text != "Session recap\n\n- Lavoro completato." || !sent[0].Markdown || sent[0].ReplyTo != 7 {
+		t.Fatalf("Sent = %+v", sent)
+	}
+	if len(f.herdr.Prompts()) != 0 {
+		t.Fatal("/recap reached the agent as a prompt")
+	}
+	f.tg.Reset()
+	f.replies.SetRecent(a.Key, "[Older session messages omitted]\n\nuser: continue")
+	if err := f.in.HandleTopic(f.ctx, topicMsg(101, 8, "/recap")); err != nil {
+		t.Fatal(err)
+	}
+	if sent := f.tg.Sent(); len(sent) != 1 || !strings.HasPrefix(sent[0].Text, "Partial session recap\n\n") {
+		t.Fatalf("partial recap = %+v", sent)
+	}
+}
+
+func TestInboundRecapUnavailableWithoutModel(t *testing.T) {
+	f := newBridgeFixture(t)
+	f.add(t, "p1", "t1", "reviewer", domain.StatusIdle)
+	if err := f.in.HandleTopic(f.ctx, topicMsg(101, 7, "/recap")); err != nil {
+		t.Fatal(err)
+	}
+	if sent := f.tg.Sent(); len(sent) != 1 || !strings.Contains(sent[0].Text, "recap unavailable") || sent[0].ReplyTo != 7 {
+		t.Fatalf("Sent = %+v", sent)
+	}
+}
+
 // fireCommand advances the clock past the command settle delay and runs
 // every due follow-up.
 func (f *bridgeFixture) fireCommand(t *testing.T, want int) {

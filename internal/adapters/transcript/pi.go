@@ -40,8 +40,10 @@ func piSlug(cwd string) string {
 // them only the user and assistant roles (tool results are their own
 // role, subagent notifications are custom_message entries).
 type piRecord struct {
-	Type    string `json:"type"`
-	Message struct {
+	Type     string `json:"type"`
+	ID       string `json:"id"`
+	ParentID string `json:"parentId"`
+	Message  struct {
 		Role    string          `json:"role"`
 		Content json.RawMessage `json:"content"`
 	} `json:"message"`

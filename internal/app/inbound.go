@@ -19,6 +19,7 @@ import (
 const helpText = `Commands
 /screen [N|all]: post the agent screen: the whole visible screen, its last N lines, or with "all" everything since your last message
 /last: post the agent's last reply, also when the turn ended with its pane in view and was not posted
+/recap: summarize recent messages from this agent's session with the cloud model
 /keys k1 k2 ...: send raw keys to the agent (esc, enter, y, 1 ...)
 /focus: bring the agent's pane to the front in Herdr
 /git status | diff [staged] | log [N]: git in the agent's directory; long output arrives as a file
@@ -284,6 +285,11 @@ func (i *inbound) HandleTopic(ctx context.Context, msg domain.TopicMessage) erro
 	case domain.CmdLast:
 		if err := i.out.Last(ctx, key); err != nil {
 			return i.failed(ctx, msg, key, "last", err)
+		}
+		return nil
+	case domain.CmdRecap:
+		if err := i.out.Recap(ctx, key, msg.MessageID); err != nil {
+			return i.failed(ctx, msg, key, "recap", err)
 		}
 		return nil
 	case domain.CmdStatus:
@@ -569,7 +575,7 @@ func (i *inbound) HandleGeneral(ctx context.Context, cmd domain.GeneralCommand) 
 		return i.reply(ctx, 0, cmd.MessageID, i.away(parsed.Away, cmd.FromID))
 	case domain.CmdHere:
 		return i.reply(ctx, 0, cmd.MessageID, i.here(cmd.FromID))
-	case domain.CmdStop, domain.CmdInterrupt, domain.CmdClose:
+	case domain.CmdStop, domain.CmdInterrupt, domain.CmdClose, domain.CmdRecap:
 		return i.reply(ctx, 0, cmd.MessageID, topicOnly)
 	case domain.CmdNew:
 		return i.startAgent(ctx, cmd, parsed)

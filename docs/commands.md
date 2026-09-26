@@ -61,6 +61,7 @@ Anything you write in a topic reaches the agent:
 | `/keys esc enter` | raw key names |
 | `/screen` or `/screen 40` | the visible screen, or its last 40 lines (max 200); the input frame is cut afterwards, so an idle Claude Code pane may answer with fewer than 40 lines |
 | `/screen all` | everything the agent printed since your last message (typed in Herdr or sent here); long output arrives as a `.txt` file |
+| `/recap` | a cloud summary of recent text from this agent's identified Claude Code or Pi session; nothing is sent to the agent |
 | `/focus` | the pane is brought to the front in Herdr |
 | `/git status`, `/git diff`, `/git diff staged`, `/git log [N]` | `git status --short --branch`, `git diff HEAD`, `git diff --cached` or `git log --oneline --decorate -n N` (default 10, at most 50) run by the daemon in the agent's working directory (`cwd` from `agent.list`), colour and pager off, 10 s timeout. Up to 3600 characters come back as a quoted code block; longer output as a `<repo>-<sub>-<hhmmss>.patch` (diff) or `.txt` file with a caption naming the argv and the line count (5 MB cap, `truncated` when cut). Empty output answers `clean`, `no changes` or `no commits`. Anything else after `/git` (a path, a flag, another subcommand) answers `usage: /git status \| diff [staged] \| log [N]`; nothing typed on the phone reaches git. Failures: `⚠️ not a git repository: <cwd>`, `⚠️ git is not installed`, `⚠️ git timed out`, `⚠️ Herdr reports no working directory`. Secret redaction applies to the output like to any post |
 | `/stop` | `esc` through `agent.send_keys`, in any status: Claude Code cancels the running turn or dismisses the open dialog; the reply is `⏹ sent esc` |
@@ -172,7 +173,7 @@ and the commands appear in Telegram's `/` menu for the group.
 | `/observers`, `/observers add <id>`, `/observers remove <id>` | the operator and observer lists plus the unknown accounts seen recently (name, `@username`, id, when and where); add or remove an observer, saved to `config.json` and applied at once. An observer may use `/status` and `/help` here and nothing else; see [Operators and observers](behaviour.md#operators-and-observers) |
 | `/help` | the command list |
 
-`/git`, `/stop`, `/interrupt` and `/close` written in General answer with a
+`/git`, `/recap`, `/stop`, `/interrupt` and `/close` written in General answer with a
 hint that they live in an agent's topic.
 
 The daemon also posts silent notices into General when it starts, stops,

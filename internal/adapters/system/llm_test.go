@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -57,6 +58,35 @@ func TestLLMRenderOK(t *testing.T) {
 	}
 	if got := seen.URL.Path; got != "/v1/chat/completions" {
 		t.Fatalf("path = %q", got)
+	}
+}
+
+func TestLLMRecapUsesBoundedStructuredRequest(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			MaxTokens int `json:"max_tokens"`
+			Messages  []struct {
+				Content string `json:"content"`
+			} `json:"messages"`
+			ResponseFormat struct {
+				JSONSchema struct {
+					Strict bool `json:"strict"`
+				} `json:"json_schema"`
+			} `json:"response_format"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+		}
+		if body.MaxTokens != 600 || !body.ResponseFormat.JSONSchema.Strict || len(body.Messages) != 2 ||
+			!strings.Contains(body.Messages[0].Content, "Summarize") || body.Messages[1].Content != "user: fix it\nassistant: done" {
+			t.Errorf("recap request invalid: %+v", body)
+		}
+		fmt.Fprint(w, llmEnvelope(`{"text":"- Completato.","options":[]}`))
+	}))
+	defer srv.Close()
+	got, err := newTestLLM(srv.URL).Recap(context.Background(), "user: fix it\nassistant: done")
+	if err != nil || got != "- Completato." {
+		t.Fatalf("Recap = %q, %v", got, err)
 	}
 }
 
