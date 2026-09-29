@@ -44,6 +44,8 @@ func TestParseCommand(t *testing.T) {
 		{"any suffix when username unknown", "/help@whatever", "", domain.Command{Kind: domain.CmdHelp}},
 		{"other bot", "/help@other_bot", "herdr_bot", domain.Command{Kind: domain.CmdUnknown, Text: "/help@other_bot"}},
 		{"unknown word", "/restart now", "herdr_bot", domain.Command{Kind: domain.CmdUnknown, Text: "/restart"}},
+		{"double slash is a prompt for the agent", " //goal test it ", "herdr_bot", domain.Command{Kind: domain.CmdPrompt, Text: "/goal test it"}},
+		{"double slash escapes a bot command", "//screen", "herdr_bot", domain.Command{Kind: domain.CmdPrompt, Text: "/screen"}},
 		{"leading whitespace before slash", "  /focus", "herdr_bot", domain.Command{Kind: domain.CmdFocus}},
 		{"forward clear", "/clear", "herdr_bot", domain.Command{Kind: domain.CmdForward, Text: "/clear", Forward: domain.ForwardRule{Post: domain.ForwardPostTail}}},
 		{"forward clear upper case with bot suffix", "/CLEAR@herdr_bot", "herdr_bot", domain.Command{Kind: domain.CmdForward, Text: "/clear", Forward: domain.ForwardRule{Post: domain.ForwardPostTail}}},

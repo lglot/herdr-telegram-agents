@@ -402,6 +402,11 @@ func ParseCommand(text, botUsername string) Command {
 	if !strings.HasPrefix(trimmed, "/") {
 		return Command{Kind: CmdPrompt, Text: text}
 	}
+	// A doubled slash escapes the bot: "//goal x" is typed into the agent as
+	// "/goal x", so any of the agent's own slash commands can be sent.
+	if strings.HasPrefix(trimmed, "//") {
+		return Command{Kind: CmdPrompt, Text: trimmed[1:]}
+	}
 	fields := strings.Fields(trimmed)
 	word := strings.TrimPrefix(fields[0], "/")
 	if at := strings.IndexByte(word, '@'); at >= 0 {

@@ -140,6 +140,7 @@ its tail silently. Anything you write in the agent's topic goes back:
 | `/stop`, `/interrupt` | `esc` (cancel the turn or dialog) or `ctrl+c` (hard interrupt), in any status |
 | `/close` | a `Yes, close` / `No` question; `Yes` closes the pane and the topic gets 🏁 |
 | `/clear`, `/compact`, `/usage`, `/model` | typed into an idle agent as a Claude Code command; the result is posted back |
+| `//goal do X` (any word after a double slash) | typed as the prompt `/goal do X`, for the agent's own slash commands |
 | `/status`, `/help` | this agent's status line, the command list |
 
 Prompts are delivered silently; tick `React to prompts` in the settings and
