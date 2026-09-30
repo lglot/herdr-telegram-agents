@@ -69,7 +69,7 @@ Anything you write in a topic reaches the agent:
 | `/interrupt` | `ctrl+c` through `agent.send_keys`, in any status: a hard interrupt; the reply is `⛔ sent ctrl+c` |
 | `/close` | the question `Close <label>? The pane and its tab go away.` with `Yes, close` / `No` buttons; `Yes` closes the pane through `pane.close` (the tab goes with it when it held nothing else) and the topic gets 🏁 through the usual exit path; `No` keeps everything. Only the latest question of an agent acts; see [Questions and buttons](behaviour.md#questions-and-buttons) |
 | `/clear`, `/compact [instructions]`, `/usage`, `/model [name]` | typed into the agent as its own Claude Code command; two seconds later the screen is posted as a quoted reply (`/usage` and a bare `/model` are closed with `esc` for you); only while the agent is idle |
-| `//word [args]` | the line without its first slash, typed as a plain prompt (`//goal ship it` sends `/goal ship it`), so any of the agent's own slash commands can be sent; nothing is posted back, like any prompt |
+| `//word [args]` | the line without its first slash, typed as a plain prompt (`//goal ship it` sends `/goal ship it`), so any of the agent's own slash commands can be sent; nothing is posted back, like any prompt; refused in private shared topics |
 | `/status` | `<emoji> <status> · <label> · pane <id>` |
 | `/options` | a hint: the settings panel lives in General |
 | `/away`, `/here`, `/new`, `/observers` | a hint: these commands live in General |

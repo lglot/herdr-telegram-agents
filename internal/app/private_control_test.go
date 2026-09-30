@@ -100,6 +100,16 @@ func TestPrivateUnknownSlashNeverBecomesPrompt(t *testing.T) {
 	}
 }
 
+func TestPrivateDoubleSlashNeverBecomesPrompt(t *testing.T) {
+	f := newPrivateFixture(t, domain.ShareControl)
+	if err := f.p.Handle(context.Background(), domain.PrivateMessage{Contact: domain.PrivateContact{ActorID: 10}, Address: f.origin.Address, MessageID: 900, Text: "//permissions"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.h.Prompts()) != 0 {
+		t.Fatalf("double slash forwarded: %v", f.h.Prompts())
+	}
+}
+
 func TestPrivateAsyncCompletionAfterRevocation(t *testing.T) {
 	for _, operation := range []string{"attachment", "git"} {
 		t.Run(operation, func(t *testing.T) {

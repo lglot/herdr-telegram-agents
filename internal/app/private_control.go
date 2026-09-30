@@ -94,6 +94,11 @@ func (p *PrivateControl) Handle(ctx context.Context, e domain.PrivateMessage) er
 		cmd = domain.Command{Kind: domain.CmdPrompt, Text: e.Text}
 	}
 	action, allowed := domain.ShareCommandAction(cmd)
+	// The "//" escape types any agent slash command; private topics refuse
+	// unknown slash commands, so the escape stays with the owner group.
+	if strings.HasPrefix(strings.TrimSpace(e.Text), "//") {
+		allowed = false
+	}
 	if e.Attachment != nil {
 		action = domain.ShareAttachment
 		allowed = true
