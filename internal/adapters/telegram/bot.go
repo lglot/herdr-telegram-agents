@@ -114,7 +114,7 @@ func Poll(ctx context.Context, b *bot.Bot, log *slog.Logger) {
 // status, options and help, in General (options, new, observers, away and
 // here only there).
 var botCommands = []models.BotCommand{
-	{Command: "screen", Description: "Show the agent screen (N: last N lines, all: output since your last message)"},
+	{Command: "screen", Description: "Show screen; idle OpenCode: last reply (N: screen tail, all: history)"},
 	{Command: "last", Description: "Post the agent's last reply (also a turn not posted because its pane was in view)"},
 	{Command: "recap", Description: "Summarize recent messages from this agent's session"},
 	{Command: "keys", Description: "Send raw keys to the agent, e.g. /keys esc"},
@@ -132,7 +132,7 @@ var botCommands = []models.BotCommand{
 	{Command: "status", Description: "Agent status here, all agents in General"},
 	{Command: "away", Description: "Treat me as away (General): /away or /away 2h"},
 	{Command: "here", Description: "Back to automatic presence (General)"},
-	{Command: "options", Description: "Settings panel (General): sync, quiet mode, posts, icons, redaction, topic cleanup"},
+	{Command: "options", Description: "Settings and update check (General)"},
 	{Command: "help", Description: "List the commands"},
 }
 

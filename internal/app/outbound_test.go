@@ -365,6 +365,281 @@ func TestOutboundLastOnRequest(t *testing.T) {
 	}
 }
 
+// TestOutboundScreenPrefersFreshReply covers a bare /screen on an agent at
+// its prompt with a reply source that has something fresh: the reply is
+// posted rendered from Markdown and the screen is never read, so an agent
+// whose TUI scrapes into scrambled text (opencode) gets a clean post.
+func TestOutboundScreenPrefersFreshReply(t *testing.T) {
+	for _, st := range []domain.Status{domain.StatusIdle, domain.StatusDone} {
+		f := newBridgeFixture(t)
+		a := f.add(t, "p1", "t1", "a", st)
+		a.Kind = "opencode"
+		f.agents[a.Key] = a
+		f.herdr.SetScreen("p1", "raw multi-column screen")
+		f.replies.Set(a.Key, "Endpoint is **live** now.")
+		if err := f.out.Screen(f.ctx, a.Key, 0); err != nil {
+			t.Fatal(err)
+		}
+		sent := f.tg.Sent()
+		if len(sent) != 1 || sent[0].Text != "Endpoint is **live** now." || sent[0].Code || !sent[0].Markdown || sent[0].MaxParts != replyMaxParts {
+			t.Fatalf("%s: Sent = %+v", st, sent)
+		}
+		if reads := f.herdr.Reads(); len(reads) != 0 {
+			t.Fatalf("%s: screen read although the reply was posted: %+v", st, reads)
+		}
+		if !strings.Contains(f.logBuf.String(), `"msg":"screen posted"`) || !strings.Contains(f.logBuf.String(), `"status":"reply"`) {
+			t.Errorf("%s: log = %s", st, f.logBuf.String())
+		}
+	}
+}
+
+func TestOutboundScreenOnlyOpenCodeUsesReply(t *testing.T) {
+	f := newBridgeFixture(t)
+	a := f.add(t, "p1", "t1", "a", domain.StatusIdle)
+	a.Kind = "claude"
+	f.agents[a.Key] = a
+	f.herdr.SetScreen("p1", "literal screen")
+	f.replies.Set(a.Key, "formatted reply")
+	if err := f.out.Screen(f.ctx, a.Key, 0); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.replies.Calls()) != 0 || len(f.herdr.Reads()) != 1 || f.tg.Sent()[0].Text != "literal screen" {
+		t.Fatalf("Claude /screen changed: calls %v, reads %v, sent %v", f.replies.Calls(), f.herdr.Reads(), f.tg.Sent())
+	}
+}
+
+func TestOutboundScreenReplyIsBounded(t *testing.T) {
+	f := newBridgeFixture(t)
+	a := f.add(t, "p1", "t1", "a", domain.StatusDone)
+	a.Kind = "opencode"
+	f.agents[a.Key] = a
+	f.replies.Set(a.Key, strings.Repeat("long reply ", 100000))
+	if err := f.out.Screen(f.ctx, a.Key, 0); err != nil {
+		t.Fatal(err)
+	}
+	if sent := f.tg.Sent(); len(sent) != 1 || sent[0].MaxParts != replyMaxParts || !sent[0].Markdown || sent[0].Notify {
+		t.Fatalf("bounded reply = %+v", sent)
+	}
+	f.tg.FailNext("send", domain.ErrForbidden)
+	if err := f.out.Screen(f.ctx, a.Key, 0); !errors.Is(err, domain.ErrForbidden) || len(f.herdr.Reads()) != 0 {
+		t.Fatalf("send failure = %v, reads %v", err, f.herdr.Reads())
+	}
+}
+
+func TestOutboundScreenReplyCancellationStopsFallback(t *testing.T) {
+	f := newBridgeFixture(t)
+	a := f.add(t, "p1", "t1", "a", domain.StatusIdle)
+	a.Kind = "opencode"
+	f.agents[a.Key] = a
+	f.replies.Fail(a.Key, context.Canceled)
+	if err := f.out.Screen(f.ctx, a.Key, 0); !errors.Is(err, context.Canceled) || len(f.herdr.Reads()) != 0 || len(f.tg.Sent()) != 0 {
+		t.Fatalf("canceled = %v, reads %v, sent %v", err, f.herdr.Reads(), f.tg.Sent())
+	}
+}
+
+func TestOutboundOpenCodeExportTimeoutFallsBackToScreen(t *testing.T) {
+	f := newBridgeFixture(t)
+	a := f.add(t, "p1", "t1", "a", domain.StatusIdle)
+	a.Kind = "opencode"
+	f.agents[a.Key] = a
+	f.herdr.SetScreen("p1", "terminal fallback")
+	f.replies.Fail(a.Key, fmt.Errorf("%w: export failed", domain.ErrNoReply))
+	if err := f.out.Screen(f.ctx, a.Key, 0); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.replies.Calls()) != 1 || len(f.herdr.Reads()) != 1 || len(f.tg.Sent()) != 1 || f.tg.Sent()[0].Text != "terminal fallback" {
+		t.Fatalf("fallback: replies %v, reads %v, sent %v", f.replies.Calls(), f.herdr.Reads(), f.tg.Sent())
+	}
+}
+
+func TestOutboundOpenCodeExportTimeoutDoneModes(t *testing.T) {
+	for _, mode := range []domain.DoneMode{domain.DoneReply, domain.DoneFormatted, domain.DoneScreen} {
+		t.Run(string(mode), func(t *testing.T) {
+			f := newBridgeFixture(t)
+			if err := f.opts.Set(f.ctx, domain.OptionPostsDone, string(mode), 1); err != nil {
+				t.Fatal(err)
+			}
+			a := f.add(t, "p1", "t1", "a", domain.StatusWorking)
+			a.Kind = "opencode"
+			f.agents[a.Key] = a
+			f.herdr.SetScreen("p1", "terminal fallback")
+			f.replies.Fail(a.Key, fmt.Errorf("%w: export failed", domain.ErrNoReply))
+			f.out.Observe(AgentEvent{Kind: AgentChanged, Agent: f.setStatus(a, domain.StatusDone)})
+			f.fire(t, 1)
+			if len(f.replies.Calls()) != 1 || len(f.herdr.Reads()) != 1 || len(f.tg.Sent()) != 1 ||
+				f.tg.Sent()[0].Text != "terminal fallback" || !f.tg.Sent()[0].Code || f.tg.Sent()[0].Footer != "" {
+				t.Fatalf("fallback: replies %v, reads %v, sent %v", f.replies.Calls(), f.herdr.Reads(), f.tg.Sent())
+			}
+		})
+	}
+}
+
+func TestOutboundOpenCodeDoneCancellationStopsFallback(t *testing.T) {
+	for _, mode := range []domain.DoneMode{domain.DoneReply, domain.DoneFormatted, domain.DoneScreen} {
+		t.Run(string(mode), func(t *testing.T) {
+			f := newBridgeFixture(t)
+			if err := f.opts.Set(f.ctx, domain.OptionPostsDone, string(mode), 1); err != nil {
+				t.Fatal(err)
+			}
+			a := f.add(t, "p1", "t1", "a", domain.StatusWorking)
+			a.Kind = "opencode"
+			f.agents[a.Key] = a
+			f.herdr.SetScreen("p1", "terminal fallback")
+			f.replies.Fail(a.Key, context.Canceled)
+			f.out.Observe(AgentEvent{Kind: AgentChanged, Agent: f.setStatus(a, domain.StatusDone)})
+			if err := f.out.fire(f.ctx, a.Key, false, false); !errors.Is(err, context.Canceled) {
+				t.Fatalf("done cancellation = %v", err)
+			}
+			if len(f.replies.Calls()) != 1 || len(f.herdr.Reads()) != 0 || len(f.tg.Sent()) != 0 {
+				t.Fatalf("after cancellation: replies %v, reads %v, sent %v", f.replies.Calls(), f.herdr.Reads(), f.tg.Sent())
+			}
+		})
+	}
+}
+
+func TestOutboundOpenCodeScreenReplyRedacted(t *testing.T) {
+	f := newBridgeFixture(t)
+	a := f.add(t, "p1", "t1", "a", domain.StatusIdle)
+	a.Kind = "opencode"
+	f.agents[a.Key] = a
+	f.replies.Set(a.Key, "password=secret_private")
+	if err := f.out.Screen(f.ctx, a.Key, 0); err != nil {
+		t.Fatal(err)
+	}
+	if sent := f.tg.Sent(); len(sent) != 1 || sent[0].Text != "password=[redacted]" || !sent[0].Markdown {
+		t.Fatalf("redacted reply = %+v", sent)
+	}
+}
+
+func TestOutboundOpenCodeFailureDoesNotLogDependencyText(t *testing.T) {
+	f := newBridgeFixture(t)
+	if err := f.opts.Set(f.ctx, domain.OptionPostsDone, string(domain.DoneFormatted), 1); err != nil {
+		t.Fatal(err)
+	}
+	a := f.add(t, "p1", "t1", "a", domain.StatusWorking)
+	a.Kind = "opencode"
+	f.agents[a.Key] = a
+	f.herdr.SetScreen("p1", "fallback text")
+	f.replies.Fail(a.Key, errors.New("ses_private secret_private"))
+	f.out.Observe(AgentEvent{Kind: AgentChanged, Agent: f.setStatus(a, domain.StatusDone)})
+	f.fire(t, 1)
+	if sent := f.tg.Sent(); len(sent) != 1 || sent[0].Text != "fallback text" || !sent[0].Code {
+		t.Fatalf("fallback = %+v", sent)
+	}
+	if logs := f.logBuf.String(); strings.Contains(logs, "ses_private") || strings.Contains(logs, "secret_private") {
+		t.Fatalf("dependency text leaked to log: %s", logs)
+	}
+}
+
+// TestOutboundScreenBusyAgentGetsScreen covers a working, blocked, or unknown OpenCode agent:
+// its progress or its dialog exists only on the screen, so a bare /screen
+// reads the screen without asking the reply source.
+func TestOutboundScreenBusyAgentGetsScreen(t *testing.T) {
+	for _, st := range []domain.Status{domain.StatusWorking, domain.StatusBlocked, domain.StatusUnknown} {
+		f := newBridgeFixture(t)
+		a := f.add(t, "p1", "t1", "a", st)
+		a.Kind = "opencode"
+		f.agents[a.Key] = a
+		f.herdr.SetScreen("p1", "Allow edit? 1. Yes 2. No")
+		f.replies.Set(a.Key, "an older reply")
+		if err := f.out.Screen(f.ctx, a.Key, 0); err != nil {
+			t.Fatal(err)
+		}
+		if calls := f.replies.Calls(); len(calls) != 0 {
+			t.Fatalf("%s: reply source consulted: %v", st, calls)
+		}
+		if reads := f.herdr.Reads(); len(reads) != 1 || reads[0].Source != domain.ScreenVisible || reads[0].Lines != 0 {
+			t.Fatalf("%s: screen reads = %+v", st, reads)
+		}
+		if sent := f.tg.Sent(); len(sent) != 1 || sent[0].Text != "Allow edit? 1. Yes 2. No" || !sent[0].Code {
+			t.Fatalf("%s: Sent = %+v", st, sent)
+		}
+	}
+}
+
+// TestOutboundScreenFallsBackWhenReplyStale covers a reply written before
+// the agent's current turn started (e.g. two panes in one directory): the
+// screen is posted instead of the outdated reply.
+func TestOutboundScreenFallsBackWhenReplyStale(t *testing.T) {
+	f := newBridgeFixture(t)
+	a := f.add(t, "p1", "t1", "a", domain.StatusWorking)
+	a.Kind = "opencode"
+	f.agents[a.Key] = a
+	f.out.Observe(AgentEvent{Kind: AgentChanged, Agent: a})
+	f.out.Observe(AgentEvent{Kind: AgentChanged, Agent: f.setStatus(a, domain.StatusIdle)})
+	f.herdr.SetScreen("p1", "raw screen text")
+	f.replies.Set(a.Key, "stale reply text")
+	f.replies.SetMeta(a.Key, domain.TurnMeta{}, f.clock.Now().Add(-time.Minute))
+	if err := f.out.Screen(f.ctx, a.Key, 0); err != nil {
+		t.Fatal(err)
+	}
+	if calls := f.replies.Calls(); len(calls) != 1 {
+		t.Fatalf("reply source calls = %v, want one", calls)
+	}
+	if sent := f.tg.Sent(); len(sent) != 1 || sent[0].Text != "raw screen text" || !sent[0].Code {
+		t.Fatalf("Sent = %+v", sent)
+	}
+}
+
+// TestOutboundScreenFallsBackWhenNoReply covers ErrNoReply (unsupported
+// kind, no session, no text): the screen is posted exactly as before the
+// reply source existed.
+func TestOutboundScreenFallsBackWhenNoReply(t *testing.T) {
+	f := newBridgeFixture(t)
+	a := f.add(t, "p1", "t1", "a", domain.StatusIdle)
+	a.Kind = "opencode"
+	f.agents[a.Key] = a
+	f.herdr.SetScreen("p1", "raw screen text")
+	if err := f.out.Screen(f.ctx, a.Key, 0); err != nil {
+		t.Fatal(err)
+	}
+	if calls := f.replies.Calls(); len(calls) != 1 {
+		t.Fatalf("reply source calls = %v, want one", calls)
+	}
+	if sent := f.tg.Sent(); len(sent) != 1 || sent[0].Text != "raw screen text" || !sent[0].Code {
+		t.Fatalf("Sent = %+v", sent)
+	}
+}
+
+// TestOutboundScreenWithLinesSkipsReplySource covers /screen N: an
+// explicit line count always reads the literal screen and never consults
+// the reply source, even when one has something to say.
+func TestOutboundScreenWithLinesSkipsReplySource(t *testing.T) {
+	f := newBridgeFixture(t)
+	a := f.add(t, "p1", "t1", "a", domain.StatusIdle)
+	a.Kind = "opencode"
+	f.agents[a.Key] = a
+	f.herdr.SetScreen("p1", "raw screen text")
+	f.replies.Set(a.Key, "should not be used")
+	if err := f.out.Screen(f.ctx, a.Key, 10); err != nil {
+		t.Fatal(err)
+	}
+	if calls := f.replies.Calls(); len(calls) != 0 {
+		t.Fatalf("reply source consulted for /screen N: %v", calls)
+	}
+	if reads := f.herdr.Reads(); len(reads) != 1 || reads[0].Source != domain.ScreenVisible || reads[0].Lines != 10 {
+		t.Fatalf("/screen N reads = %+v", reads)
+	}
+	if sent := f.tg.Sent(); len(sent) != 1 || sent[0].Text != "raw screen text" || !sent[0].Code {
+		t.Fatalf("Sent = %+v", sent)
+	}
+}
+
+// TestOutboundScreenNilReplySourceUsesScreen covers the daemon wired with
+// no reply source: a bare /screen behaves as it always did.
+func TestOutboundScreenNilReplySourceUsesScreen(t *testing.T) {
+	f := newBridgeFixture(t)
+	f.out.replies = nil
+	a := f.add(t, "p1", "t1", "a", domain.StatusIdle)
+	f.herdr.SetScreen("p1", "raw screen text")
+	if err := f.out.Screen(f.ctx, a.Key, 0); err != nil {
+		t.Fatal(err)
+	}
+	if sent := f.tg.Sent(); len(sent) != 1 || sent[0].Text != "raw screen text" || !sent[0].Code {
+		t.Fatalf("Sent = %+v", sent)
+	}
+}
+
 func TestTrimScreen(t *testing.T) {
 	tests := []struct{ in, want string }{
 		{"", ""},
@@ -727,6 +1002,8 @@ func TestOutboundDoneModes(t *testing.T) {
 				t.Fatal(err)
 			}
 			a := f.add(t, "p1", "t1", "reviewer", domain.StatusWorking)
+			a.Kind = "opencode"
+			f.agents[a.Key] = a
 			f.herdr.SetScreen("p1", "recap: all tests pass")
 			f.replies.Set(a.Key, "  Done. **All** tests pass.\n")
 			f.out.Observe(AgentEvent{Kind: AgentChanged, Agent: f.setStatus(a, domain.StatusDone)})
@@ -1150,7 +1427,7 @@ func TestOutboundIdleEndsTurnAfterSettle(t *testing.T) {
 	// Five seconds of idle end it.
 	f.out.Observe(AgentEvent{Kind: AgentChanged, Agent: f.setStatus(a, domain.StatusIdle)})
 	f.endTurns(t, 1)
-	assertCallsEqual(t, f.tg, "react:101:2:👀", "react:101:2:👌")
+	assertCallsEqual(t, f.tg, "react:101:2:👀", "react:101:2:👌", "send:101:screen")
 	if _, open := f.out.turns[a.Key]; open {
 		t.Fatal("turn still open after idle settle")
 	}
@@ -1162,8 +1439,18 @@ func TestOutboundIdleEndsTurnAfterSettle(t *testing.T) {
 	}
 	f.out.Observe(AgentEvent{Kind: AgentChanged, Agent: f.setStatus(a, domain.StatusIdle)})
 	f.endTurns(t, 1)
-	if calls := f.tg.Calls(); len(calls) != 2 {
-		t.Fatalf("reaction without a prompt: %q", calls)
+	assertCallsEqual(t, f.tg, "react:101:2:👀", "react:101:2:👌", "send:101:screen")
+}
+
+func TestOutboundIdleCompletionPostsScreen(t *testing.T) {
+	f := newBridgeFixture(t)
+	a := f.add(t, "p1", "t1", "reviewer", domain.StatusWorking)
+	f.herdr.SetScreen("p1", "What would you like me to check?")
+	f.out.Observe(AgentEvent{Kind: AgentAppeared, Agent: a})
+	f.out.Observe(AgentEvent{Kind: AgentChanged, Agent: f.setStatus(a, domain.StatusIdle)})
+	f.endTurns(t, 1)
+	if sent := f.tg.Sent(); len(sent) != 1 || sent[0].Text != "What would you like me to check?" || sent[0].Notify {
+		t.Fatalf("idle completion posts = %+v", sent)
 	}
 }
 
@@ -2044,7 +2331,7 @@ func TestOutboundLLMForceSkipped(t *testing.T) {
 	f.herdr.SetScreen("p1", "same question")
 	blocked := f.setStatus(a, domain.StatusBlocked)
 	f.out.Observe(AgentEvent{Kind: AgentChanged, Agent: blocked})
-	if err := f.out.fire(f.ctx, a.Key, true); err != nil {
+	if err := f.out.fire(f.ctx, a.Key, true, false); err != nil {
 		t.Fatal(err)
 	}
 	sent := f.tg.Sent()

@@ -337,10 +337,10 @@ func (o *outbound) observeTurn(ev AgentEvent) {
 }
 
 // EndTurn runs when an agent has stayed idle for turnSettle: the open turn
-// ends with its ✅ and is dropped. An agent that moved on meanwhile keeps
-// its turn. Only fatal Telegram errors are returned.
+// ends with its reaction and a silent completion post. An agent that moved on
+// meanwhile keeps its turn. Only fatal Telegram errors are returned.
 func (o *outbound) EndTurn(ctx context.Context, key domain.Key) error {
-	t, ok := o.turns[key]
+	_, ok := o.turns[key]
 	if !ok {
 		o.log.Debug("turn end without turn", slog.String("key", key.String()))
 		return nil
@@ -350,8 +350,9 @@ func (o *outbound) EndTurn(ctx context.Context, key domain.Key) error {
 		o.log.Debug("turn end skipped", slog.String("key", key.String()), slog.Bool("alive", alive), slog.String("status", string(agent.Status)))
 		return nil
 	}
-	delete(o.turns, key)
-	return o.finishTurn(ctx, key, t, "idle")
+	// Some agents settle directly into idle after producing a final answer.
+	// Treat that settled turn like done so its answer reaches the topic.
+	return o.fire(ctx, key, false, true)
 }
 
 // finishTurn logs the end of a turn and pays the ✅ owed on its prompt.
@@ -498,25 +499,33 @@ func (o *outbound) Forget(ctx context.Context, key domain.Key) error {
 // While quiet mode is on the post follows the posts mode: held (not sent),
 // silent (no sound) or normal.
 func (o *outbound) Fire(ctx context.Context, key domain.Key) error {
-	return o.fire(ctx, key, false)
+	return o.fire(ctx, key, false, false)
 }
 
 // fire is Fire with a force flag for the catch-up: force bypasses the
 // duplicate check and the quiet rules and always rings.
-func (o *outbound) fire(ctx context.Context, key domain.Key, force bool) error {
+func (o *outbound) fire(ctx context.Context, key domain.Key, force, idleCompletion bool) error {
 	agent, ok := o.agents(key)
 	if !ok {
 		return o.skip(key, "exited")
+	}
+	status := agent.Status
+	if idleCompletion && status == domain.StatusIdle {
+		status = domain.StatusDone
 	}
 	// A done status ends the turn here, before any reason to skip the
 	// post: the ✅ is owed even when the post is muted, held or short.
 	var t turn
 	var hasTurn bool
-	if agent.Status == domain.StatusDone {
+	if status == domain.StatusDone {
 		if t, hasTurn = o.turns[key]; hasTurn {
 			delete(o.turns, key)
 			o.turnDeb.Cancel(key)
-			if err := o.finishTurn(ctx, key, t, "done"); err != nil {
+			reason := "done"
+			if idleCompletion {
+				reason = "idle"
+			}
+			if err := o.finishTurn(ctx, key, t, reason); err != nil {
 				return err
 			}
 		}
@@ -536,7 +545,7 @@ func (o *outbound) fire(ctx context.Context, key domain.Key, force bool) error {
 		}
 	}
 	var lines int
-	switch agent.Status {
+	switch status {
 	case domain.StatusBlocked:
 		lines = blockedLines
 	case domain.StatusDone:
@@ -548,7 +557,7 @@ func (o *outbound) fire(ctx context.Context, key domain.Key, force bool) error {
 	// A done post of a turn shorter than posts.min_seconds is skipped; a
 	// turn whose start the daemon never saw posts. The catch-up never
 	// reaches here with done, so force needs no exception.
-	if minTurn := o.minTurn(); agent.Status == domain.StatusDone && minTurn > 0 && hasTurn && !t.started.IsZero() {
+	if minTurn := o.minTurn(); status == domain.StatusDone && minTurn > 0 && hasTurn && !t.started.IsZero() {
 		if elapsed := o.clock.Now().Sub(t.started); elapsed < minTurn {
 			o.log.Debug("screen skipped", slog.String("key", key.String()), slog.String("reason", "short_turn"),
 				slog.Int64("duration_ms", elapsed.Milliseconds()), slog.Int64("min_ms", minTurn.Milliseconds()))
@@ -564,7 +573,7 @@ func (o *outbound) fire(ctx context.Context, key domain.Key, force bool) error {
 	case entry.Muted:
 		return o.skip(key, "muted")
 	}
-	notify := agent.Status == domain.StatusBlocked
+	notify := status == domain.StatusBlocked
 	if force {
 		notify = true
 	} else if o.quiet() {
@@ -578,7 +587,7 @@ func (o *outbound) fire(ctx context.Context, key domain.Key, force bool) error {
 	// A done post may come from the agent's transcript instead of the
 	// screen; any failure there falls back to the screen with one info line.
 	mode := domain.DoneScreen
-	if agent.Status == domain.StatusDone {
+	if status == domain.StatusDone {
 		mode = o.doneMode()
 	}
 	var text string
@@ -586,7 +595,7 @@ func (o *outbound) fire(ctx context.Context, key domain.Key, force bool) error {
 	// With a blocked delay the first capture waits for a second one; the
 	// catch-up never waits and drops whatever was kept.
 	captured := false
-	if agent.Status == domain.StatusBlocked {
+	if status == domain.StatusBlocked {
 		switch delay := o.blockedDelay(); {
 		case force:
 			delete(o.captures, key)
@@ -606,19 +615,29 @@ func (o *outbound) fire(ctx context.Context, key domain.Key, force bool) error {
 	// transcript last written before the turn started belongs to an
 	// earlier turn (two Claude panes in one directory) and counts as
 	// unavailable. A failure costs the screen mode nothing but the line.
-	wantMeta := agent.Status == domain.StatusDone && o.meta() && o.replies != nil
+	wantMeta := status == domain.StatusDone && o.meta() && o.replies != nil
 	var footer string
 	if !captured && (mode != domain.DoneScreen || wantMeta) {
 		r, err := o.replies.LastReply(ctx, agent)
-		if err == nil && hasTurn && !t.started.IsZero() && !r.Written.IsZero() && r.Written.Before(t.started) {
+		if err == nil && !freshReply(hasTurn, t.started, r) {
 			err = fmt.Errorf("%w: stale transcript: written %s before the turn started", domain.ErrNoReply, t.started.Sub(r.Written).Round(time.Second))
+		}
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return err
+		}
+		logErr := err
+		if agent.Kind == "opencode" && err != nil {
+			logErr = fmt.Errorf("reply unavailable")
 		}
 		switch {
 		case err != nil && mode != domain.DoneScreen:
-			o.log.Info("reply source unavailable", slog.String("key", key.String()), slog.String("mode", string(mode)), slog.Any("err", err))
+			o.log.Info("reply source unavailable", slog.String("key", key.String()), slog.String("mode", string(mode)), slog.Any("err", logErr))
 			mode = domain.DoneScreen
 		case err != nil:
-			o.log.Debug("turn meta unavailable", slog.String("key", key.String()), slog.Any("err", err))
+			o.log.Debug("turn meta unavailable", slog.String("key", key.String()), slog.Any("err", logErr))
 		default:
 			if mode != domain.DoneScreen {
 				reply, text = r, strings.TrimSpace(r.Text)
@@ -653,7 +672,7 @@ func (o *outbound) fire(ctx context.Context, key domain.Key, force bool) error {
 	// whose toggle refresh rewrites the post with preHTML.
 	useLLM := o.render != nil && mode == domain.DoneScreen && !force
 	var reDialog domain.Dialog
-	if agent.Status == domain.StatusBlocked {
+	if status == domain.StatusBlocked {
 		reDialog = domain.ParseDialog(text)
 		if reDialog.Multi {
 			useLLM = false
@@ -672,7 +691,7 @@ func (o *outbound) fire(ctx context.Context, key domain.Key, force bool) error {
 	var llmDur time.Duration
 	if useLLM {
 		t0 := o.clock.Now()
-		r, err := o.render.Render(ctx, agent.Kind, redacted, agent.Status == domain.StatusBlocked)
+		r, err := o.render.Render(ctx, agent.Kind, redacted, status == domain.StatusBlocked)
 		llmDur = o.clock.Now().Sub(t0)
 		if o.movedOn(key, agent) {
 			return o.skip(key, "moved_on")
@@ -700,7 +719,7 @@ func (o *outbound) fire(ctx context.Context, key domain.Key, force bool) error {
 		out.Fold = o.fold()
 	}
 	var dialog domain.Dialog
-	if agent.Status == domain.StatusBlocked {
+	if status == domain.StatusBlocked {
 		dialog = reDialog
 		if len(dialog.Choices) == 0 && llmOK {
 			if grounded, ok := domain.GroundChoices(redacted, llmChoices); ok {
@@ -716,7 +735,7 @@ func (o *outbound) fire(ctx context.Context, key domain.Key, force bool) error {
 	}
 	// With the pager the topic post stays silent and the ring comes from
 	// the bot's private chat, so a muted group still rings exactly once.
-	paged := notify && agent.Status == domain.StatusBlocked && o.paging()
+	paged := notify && status == domain.StatusBlocked && o.paging()
 	if paged {
 		out.Notify = false
 	}
@@ -738,7 +757,7 @@ func (o *outbound) fire(ctx context.Context, key domain.Key, force bool) error {
 		if rang {
 			o.announced[key] = true
 		}
-	case notify && agent.Status == domain.StatusBlocked:
+	case notify && status == domain.StatusBlocked:
 		o.announced[key] = true
 	}
 	if mode != domain.DoneScreen {
@@ -917,7 +936,7 @@ func (o *outbound) CatchUp(ctx context.Context) error {
 			continue
 		}
 		before := len(o.lastPosted)
-		if err := o.fire(ctx, key, true); err != nil {
+		if err := o.fire(ctx, key, true, false); err != nil {
 			return err
 		}
 		if o.announced[key] || len(o.lastPosted) > before {
@@ -1346,10 +1365,31 @@ func (o *outbound) absorbEdit(key domain.Key, err error) error {
 // when lines is 0, else its last lines. Unlike Fire it ignores the mute
 // flag and the duplicate check because the operator asked for it. Errors
 // are returned so the caller can tell the operator.
+//
+// A bare /screen (lines == 0) on an OpenCode agent at its prompt tries the reply
+// source first and posts the reply rendered from Markdown: OpenCode draws a
+// multi-column TUI that comes out as scrambled text when
+// the screen is scraped row by row. /screen N stays a literal screen read on purpose: an
+// explicit line count asks for the terminal, e.g. a permission dialog or
+// tool output the reply source has no representation of.
 func (o *outbound) Screen(ctx context.Context, key domain.Key, lines int) error {
 	entry, ok := o.topics.Entry(key)
 	if !ok {
 		return fmt.Errorf("screen for %s: no topic", key)
+	}
+	if lines == 0 {
+		text, hasReply, err := o.replyScreen(ctx, key)
+		if err != nil {
+			return err
+		}
+		if hasReply {
+			if _, err := o.tg.Send(ctx, domain.Outgoing{ThreadID: entry.ThreadID, Text: text, Markdown: true, MaxParts: replyMaxParts}); err != nil {
+				return err
+			}
+			o.log.Info("screen posted", slog.String("key", key.String()), slog.Int("thread_id", entry.ThreadID),
+				slog.String("status", "reply"), slog.Int("lines", strings.Count(text, "\n")+1), slog.Int("bytes", len(text)))
+			return nil
+		}
 	}
 	screen, err := o.herdr.ReadScreen(ctx, key.PaneID, domain.ScreenVisible, lines)
 	if err != nil {
@@ -1450,6 +1490,55 @@ func (o *outbound) Recap(ctx context.Context, key domain.Key, replyTo int) error
 	}
 	o.log.Info("recap posted", slog.String("key", key.String()), slog.Int("message_id", id), slog.Int("bytes", len(text)))
 	return nil
+}
+
+// replyScreen tries the agent's reply source for a bare /screen post. ok
+// is false whenever the screen should be scraped exactly as before: no
+// reply source, the agent is gone or not at its prompt (a working agent's
+// progress and a blocked agent's dialog exist only on the screen), the
+// source has nothing for it (ErrNoReply: unsupported kind, no session, no
+// text) or what it has predates the agent's current turn.
+func (o *outbound) replyScreen(ctx context.Context, key domain.Key) (string, bool, error) {
+	if o.replies == nil {
+		return "", false, ctx.Err()
+	}
+	agent, ok := o.agents(key)
+	if !ok || agent.Kind != "opencode" || !agent.Status.ReadyForInput() {
+		return "", false, ctx.Err()
+	}
+	r, err := o.replies.LastReply(ctx, agent)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return "", false, ctxErr
+	}
+	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return "", false, err
+		}
+		o.log.Debug("screen reply unavailable", slog.String("key", key.String()), slog.String("category", "unavailable"))
+		return "", false, nil
+	}
+	t, hasTurn := o.turns[key]
+	if !freshReply(hasTurn, t.started, r) {
+		o.log.Debug("screen reply stale", slog.String("key", key.String()),
+			slog.Time("written", r.Written), slog.Time("turn_started", t.started))
+		return "", false, nil
+	}
+	text := strings.TrimSpace(r.Text)
+	if text == "" {
+		return "", false, nil
+	}
+	return text, true, nil
+}
+
+// freshReply reports whether r belongs to the current turn. No known turn
+// start or no known write time leaves nothing to compare, so it counts as
+// fresh; a reply written before the turn started belongs to an earlier
+// turn and is stale.
+func freshReply(hasTurn bool, turnStarted time.Time, r domain.Reply) bool {
+	if !hasTurn || turnStarted.IsZero() || r.Written.IsZero() {
+		return true
+	}
+	return !r.Written.Before(turnStarted)
 }
 
 // ScreenAll posts what the agent printed since the last human message: the

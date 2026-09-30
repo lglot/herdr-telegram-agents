@@ -18,8 +18,8 @@ answer in the topic. See [Silence the group](behaviour.md#silence-the-group)
 for why. When it turns **done** the topic gets the last 12 lines of the
 screen, or the agent's last reply when `Done post` in `/options` says so (see
 [Done posts](behaviour.md#done-posts)); under it, one line with the turn's
-duration, model, edited files and output tokens from the Claude Code
-transcript (`Turn summary line`), and a reply longer than `Fold long replies
+duration, model, edited files and output tokens from the Claude Code transcript
+or the exact OpenCode session (`Turn summary line`), and a reply longer than `Fold long replies
 after` arrives collapsed behind an arrow. Every screen post ends on the agent's
 last line: Claude Code's input frame at the bottom (the `─` rules with the
 empty `❯` row, the status line and the mode hint) is cut while `Trim the
@@ -59,7 +59,8 @@ Anything you write in a topic reaches the agent:
 | plain text | typed as a prompt and submitted (`agent.prompt`) |
 | `y`, `n`, `yes`, `no`, `1`..`9`, `enter`, `ok`, `esc` while the agent is blocked | the matching key (`agent.send_keys`); in any other status these are prompts. Pressing a button under the question sends its number the same way |
 | `/keys esc enter` | raw key names |
-| `/screen` or `/screen 40` | the visible screen, or its last 40 lines (max 200); the input frame is cut afterwards, so an idle Claude Code pane may answer with fewer than 40 lines |
+| `/screen` | for idle or done OpenCode, the current session's last reply rendered with bold, lists, links, and code blocks, up to five messages; if unavailable, the visible screen. Claude Code and other agents always show the visible screen. Working and blocked agents show their progress or dialog from the screen |
+| `/screen 40` | the visible screen's last 40 lines (max 200), never the reply; the input frame is cut afterwards, so an idle Claude Code pane may answer with fewer than 40 lines |
 | `/screen all` | everything the agent printed since your last message (typed in Herdr or sent here); long output arrives as a `.txt` file |
 | `/recap` | a cloud summary of recent text from this agent's identified Claude Code or Pi session; nothing is sent to the agent |
 | `/focus` | the pane is brought to the front in Herdr |
@@ -167,7 +168,7 @@ and the commands appear in Telegram's `/` menu for the group.
 | You write | What happens |
 |-----------|--------------|
 | `/status` | every live agent with its status emoji, a link to its topic and, once known, how long it has been in that status (`· 12 min`); the first line says when quiet mode is holding edits (`🔕 …`), when you are away by hand (`🏃 …`) or when sync is off (`🔇 …`). The same text, with an `updated HH:MM` footer, is the pinned dashboard; see [The dashboard](behaviour.md#the-dashboard) |
-| `/options` | the settings panel: sync, quiet mode, status icons, secret redaction, topic cleanup; see [Options](behaviour.md#options) |
+| `/options` | the settings panel: sync, quiet mode, status icons, secret redaction, topic cleanup, and a two-press plugin update action; see [Options](behaviour.md#options) and [Plugin updates](behaviour.md#plugin-updates) |
 | `/away`, `/away 2h` | you count as away until `/here`, or for that long (any Go duration from `1m` to `168h`): held topic edits and posts go out at once; see [Quiet while at the desk](behaviour.md#quiet-while-at-the-desk) |
 | `/here` | presence is automatic again; the reply says the current verdict |
 | `/new <workspace> [kind]` | opens an unfocused tab in that workspace (`tab.create`, Herdr's default directory and label) and starts an agent in its root pane (`agent.start`). The workspace is matched by label, case-insensitive: an exact match wins, else a unique prefix (`/new wor` for `Work`); labels may contain spaces. The last word is the kind only when Herdr knows it (`pi`, `claude`, `codex`, `gemini`, `cursor`, `devin`, `agy`, `cline`, `omp`, `mastracode`, `opencode`, `copilot`, `kimi`, `kiro`, `droid`, `amp`, `grok`, `hermes`, `kilo`, `qodercli`, `maki`), default `claude`; no arguments reach the agent. The first reply is `starting <kind> in <workspace> …`, the second, up to a minute later, `started <kind> in <workspace> (pane <id>)` or `⚠️ <kind> did not start in <workspace>: <reason>`; the topic appears through the ordinary sync. A bare `/new`, an unknown or an ambiguous label answer with the workspace list |

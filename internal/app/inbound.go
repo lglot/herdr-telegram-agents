@@ -17,7 +17,7 @@ import (
 
 // helpText is the command list shown by /help in a topic and in General.
 const helpText = `Commands
-/screen [N|all]: post the agent screen: the whole visible screen, its last N lines, or with "all" everything since your last message
+/screen [N|all]: for idle or done OpenCode, post its last reply when available (up to 5 messages); otherwise the visible screen; with N the screen's last N lines, with "all" everything since your last message
 /last: post the agent's last reply, also when the turn ended with its pane in view and was not posted
 /recap: summarize recent messages from this agent's session with the cloud model
 /keys k1 k2 ...: send raw keys to the agent (esc, enter, y, 1 ...)
@@ -32,7 +32,7 @@ const helpText = `Commands
 /away [2h]: treat you as away until /here or for the given time, so Telegram gets everything (General only)
 /here: back to automatic presence (General only)
 /new <workspace> [kind]: start an agent in a new tab of that workspace (General only; kind defaults to claude)
-/options: settings panel (General only): sync, quiet mode, status icons, secret redaction, topic cleanup
+/options: settings and update check (General only)
 /observers [add|remove <id>]: list or change who may watch the group without driving agents (General only)
 /help: this list
 

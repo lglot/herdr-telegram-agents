@@ -208,8 +208,11 @@ at DEBUG without screen text; a final failed read produces one WARN.
 
 ## Done posts
 
-When an agent turns 🏆 done the topic gets one silent post. What it holds is
-the `Done post` option of the Posts group:
+When an agent turns 🏆 done, or settles in idle for five seconds after a
+working turn, the topic gets one silent completion post. The idle fallback
+covers agents that finish an answer without reporting `done`. Duplicate
+screen text is still suppressed. What the post holds is the `Done post`
+option of the Posts group:
 
 - **Screen** (default): the last 12 lines of the terminal, as a code block,
   without Claude Code's input frame at the bottom (the two `─` rules with the
@@ -232,7 +235,22 @@ the `Done post` option of the Posts group:
   `~/.claude/projects/<cwd with every non-alphanumeric character as "-">/`,
   or in `~/.pi/agent/sessions/--<cwd without the leading "/", every "/",
   "\" and ":" as "-">--/` for Pi. The text is posted as a code block, so
-  Markdown shows as the agent typed it.
+  Markdown shows as the agent typed it. For OpenCode, which keeps its sessions in a database
+  rather than a file per session, the daemon asks Herdr for the pane's
+  `agent_session` at read time and runs `opencode session export <session id>`
+  on OpenCode 2.x, falling back to `opencode export <session id>` on 1.x (the
+  `opencode` binary on `PATH`, one shared 10 s timeout, 16 MiB stdout cap per
+  attempt): the reply is
+  every text part the agent wrote after your last prompt, joined in order,
+  skipping reasoning, tool calls and patches. The session value is used for
+  that one lookup and never stored or logged. The pane must have a complete
+  session identity matching the topic; after a session change, the screen is
+  posted until Herdr reconciles the new identity. Export stderr is discarded;
+  failures use short categories without session IDs or command output. An
+  export timeout falls back to the screen while the parent request is alive.
+  Install Herdr's OpenCode integration with `herdr integration install opencode`
+  so Herdr reports `agent_session`; restart the OpenCode pane after installing
+  it. Without that reference, the visible screen is posted instead.
 - **Formatted**: the same reply rendered for Telegram: headings become bold,
   `- ` lists become `•`, quotes get a bar, `[text](url)` becomes a link,
   inline code and fenced blocks keep their monospace. Telegram has no
@@ -255,9 +273,10 @@ excluded) and how many output tokens it wrote (summed once per API
 response). A part the transcript does not know is left out; nothing known
 means no line. There is no cost: Claude Code writes the cost once at the
 end of the session, not per turn, and a price table would drift from what
-the status line shows. Claude Code only: a Codex pane, a pane without a
-working directory or one without a transcript directory posts as before
-and the log says why at debug (`turn meta unavailable`). In `Screen` mode
+the status line shows. Claude Code and OpenCode only (for OpenCode the
+  edited files are distinct paths from completed `edit` and `write` tools): a Codex pane, a
+  pane without a working directory or one without a transcript directory
+posts as before and the log says why at debug (`turn meta unavailable`). In `Screen` mode
 the transcript is read for the line alone. A transcript last written
 before the turn's first `working` status belongs to an earlier turn (two
 Claude panes in one directory): its line is skipped and, in `Reply` /
@@ -278,12 +297,17 @@ Pi) panes in the same directory cannot be told apart, so the reply of the
 one that wrote last wins (the stale check above catches the case where the
 other pane wrote before this turn began); a Claude Code profile outside
 `~/.claude*` is found only by the directory fallback; Pi gets the reply
-but no summary line; other
-agents (Codex, OpenCode, ...) always get the screen; when no
-transcript or no text is found the daemon posts the screen and logs
-`reply source unavailable` with the reason. Blocked posts and `/screen` are
-never affected: the dialog with its buttons exists only on the screen, and
-neither carries the summary line or the fold.
+but no summary line; Codex always gets the screen; when no transcript or no
+text is found the daemon posts the screen and logs `reply source
+unavailable` with a safe category. Blocked posts are never affected: the dialog
+with its buttons exists only on the screen. For an idle or done OpenCode agent,
+a bare `/screen` tries the current session reply, rendered like `Formatted`,
+whatever `Done post` says. It falls back to the screen when the reply is
+unavailable, empty, or stale. The reply stops after five Telegram messages
+with a truncation trailer. Claude Code and other agents keep the visible
+screen for `/screen`; `/screen N` always reads the screen, and `/screen all`
+uses captured history (see [commands](commands.md)). None of these commands
+carries the summary line or the fold.
 
 ## Turns and reactions
 
@@ -321,9 +345,9 @@ Two things hang on it:
 `/options` in the General topic answers with one message that is edited in
 place as you press its buttons; only operators can press them, and every
 string on it is English. A new `/options` retires the previous panel's
-keyboard, `✖ Close` leaves a one-line-per-option summary behind. The buttons
-carry everything they need, so a panel still works after the daemon was
-restarted.
+keyboard, `✖ Close` leaves a one-line-per-option summary behind. Option
+buttons still work after a daemon restart; an Update authorization expires
+and needs a fresh check.
 
 - **Level 1** lists the groups (Sync, Quiet, Posts, Inbox, Appearance,
   Privacy, Topics) with a description each.
@@ -353,8 +377,8 @@ The options today:
 | `Hold topic edits` | Quiet | Default on. While at the desk no topic is created, renamed, closed, reopened or given a new icon; each of those is a Telegram service message that rings the phone. Off keeps topic edits live while at the desk. |
 | `Screen posts` | Quiet | Default `Silent`. What happens to blocked and done screens while at the desk: `Silent` posts without a sound (Telegram still shows a silent banner), `Held` posts nothing until you leave, `Normal` posts as usual. |
 | `Re-announce on leaving` | Quiet | Default on. When you leave, the screen of every agent still waiting for an answer is posted again with a sound, once per question. Off: only agents that have no post at all yet are posted. |
-| `Done post` | Posts | Default `Screen`. What a topic receives when its agent finishes: `Screen` posts the last 12 terminal lines in monospace; `Reply` posts the agent's last message from its Claude Code or Pi transcript in monospace; `Formatted` renders that message: headings and bold, `•` lists, links, inline and fenced code, narrow tables as a grid and wide ones as one entry per row. A reply longer than five messages is cut with `… (+N chars)`. Falls back to `Screen` for non-Claude agents or when no reply is found, see [Done posts](#done-posts). |
-| `Turn summary line` | Posts | Default on. Every done post (`Screen`, `Reply` and `Formatted`) ends with one line from the agent's transcript: `⏱ 4 min · fable-5-1 · ✏️ 3 files · ↑ 12k tokens` (turn duration, model, distinct files edited, output tokens). Claude Code only; without a transcript the post ends as before and the log has `turn meta unavailable` at debug. A transcript written before the turn began is skipped. Off: no line and, in `Screen` mode, no transcript read. See [Done posts](#done-posts). |
+| `Done post` | Posts | Default `Screen`. What a topic receives when its agent finishes: `Screen` posts the last 12 terminal lines in monospace; `Reply` posts the agent's last message from its Claude Code or Pi transcript in monospace; `Formatted` renders that message: headings and bold, `•` lists, links, inline and fenced code, narrow tables as a grid and wide ones as one entry per row. A reply longer than five messages is cut with `… (+N chars)`. For OpenCode the message comes from the CLI export for the pane's session. Falls back to `Screen` for other agents or when no reply is found, see [Done posts](#done-posts). |
+| `Turn summary line` | Posts | Default on. Every done post (`Screen`, `Reply` and `Formatted`) ends with one line from the agent's transcript: `⏱ 4 min · fable-5-1 · ✏️ 3 files · ↑ 12k tokens` (turn duration, model, distinct files edited, output tokens). Claude Code and OpenCode only; without a transcript the post ends as before and the log has `turn meta unavailable` at debug. A transcript written before the turn began is skipped. Off: no line and, in `Screen` mode, no transcript read. See [Done posts](#done-posts). |
 | `Fold long replies after` | Posts | Default `20 lines`. A `Reply` or `Formatted` done post whose message part has more lines than this arrives collapsed in Telegram's expandable quote: the first lines and an arrow that opens the rest; the summary line stays visible under it. `Off` never folds; `Screen` posts are never folded. Any integer of lines up to 1000 can be typed into `options.json`. See [Done posts](#done-posts). |
 | `Trim the input frame` | Posts | Default on. Every screen post (done and blocked screens, `/screen`, `/screen all`, the tails of the Claude Code commands, the pager's six lines) loses Claude Code's input frame at the bottom: the `─` rule (with the session name in it, `──── my-session ─`, for a named session), the empty `❯` row, the second rule, the status line (`… │ main ✓ │ 14%: …`) and the mode hint (`⏵⏵ auto mode on (shift+tab to cycle)` or `? for shortcuts`), plus the `✔ Update installed · Restart to apply` notice right above the box. The cut walks up from the bottom and stops at the first line that is none of these, so a dialog and its options are never touched, a `❯` row with typed text is left alone and a screen without the frame (Codex, any other agent) passes through unchanged. The duplicate check runs after the cut, so a screen that differs only in the status line's clock is not posted twice. Off posts the screen as captured. |
 | `React to prompts` | Posts | Default off: prompts are delivered silently. On: 👀 on your message once the agent took the prompt, 👌 when that turn ends (done, or 5 s of idle). Telegram may ring for each reaction, which is why it is off. See [Turns and reactions](#turns-and-reactions). |
@@ -380,6 +404,55 @@ Values are saved in `options.json` next to `config.json` (mode 0600) as
 Missing keys take their defaults and unknown keys survive a save. The file
 is read once at daemon start: edit it by hand and restart the daemon, or use
 the panel, which applies a change immediately.
+
+## Plugin updates
+
+`/options` in General has a **Check for updates** action below the option
+groups. It is an action, not a value in `options.json`. Only an operator in
+the configured group may press it. The first press checks the public GitHub
+releases list, including prereleases but excluding drafts, and compares
+semantic versions with the installed manifest and binary. It scans every
+release page within a fixed bound; a network error or incomplete scan is
+shown as a failure rather than as "up to date". No GitHub token is required.
+The check verifies the host binary and its exact entry in `checksums.txt`,
+the release manifest version, and its minimum Herdr version.
+
+If a newer release is eligible, the panel shows a separate **Update** button.
+That button expires after five minutes and is bound to the operator, group,
+panel message, tag, and installation state. Pressing it repeats the release
+and installation checks before an update worker starts. A replaced panel,
+changed target, duplicate press, or press by another account cannot start
+another job. There are no scheduled checks or unattended installs.
+
+Herdr-managed GitHub installs use `herdr plugin install
+permgps/herdr-telegram-agents --ref <exact-tag> --yes`. An intentional
+`--ref` pin is left alone. A previous exact tag installed by this update
+action is recognised from `update.json`, so it does not block a later update.
+A local link stays local: its `main` branch must be clean, have the expected
+GitHub origin, and be able to fast-forward to the release commit on the
+remote mainline. The worker saves the old binary, stops a running daemon,
+fast-forwards, and runs the release's checksum-verified install script.
+Detached branches, local changes, another repository, and an incompatible
+Herdr version show the release and a reason without an Update button.
+
+The worker runs from a copy under the plugin state directory. It preserves
+the prior running or stopped state. For a previously running daemon, success
+requires a new daemon pid serving the target version, a healthy Herdr
+connection, and a started Telegram poller. A failure after replacement makes
+one rollback attempt. If rollback cannot be verified, `update.json` records
+`stuck` and the panel points to manual recovery. The final outcome edits the
+same General panel message, so retrying delivery cannot create a duplicate.
+Checking and editing the panel does not change forum topics or create topic
+service messages.
+
+For manual recovery, inspect `update.json`, `daemon.log`, and
+`update-worker.err.log` in the state directory. A managed installation can
+be restored with `herdr plugin install
+permgps/herdr-telegram-agents --ref <old-commit> --yes`. For a linked
+checkout, keep any new local changes, then restore the recorded old commit
+and the binary backup under `update-backups/<job-id>/`; run the install
+script from the desired release if a fresh binary is needed. Start or
+restart the daemon through the Herdr action after the files are sound.
 
 ## Silence the group
 
@@ -476,7 +549,8 @@ you can see the plugin working. Tick `Quiet while at the desk` in
 
 Every text that leaves the daemon for Telegram (blocked and done posts,
 `/screen` and `/screen all`, the `.txt` document, the follow-up of a
-forwarded Claude Code command, the labels of inline buttons, panel edits)
+forwarded Claude Code command, summary footers, document names, the labels
+of inline buttons, panel edits)
 passes one redaction step while `Redact secrets` is on:
 
 - API keys and tokens keep a recognisable prefix and their last four
@@ -528,13 +602,24 @@ default) and deletes them through `deleteForumTopic`, which needs the
 **Delete messages** right; the entries are then forgotten. Reopening such a
 topic by hand takes it out of the sweep until it is closed again, and the
 clock restarts from the last change. Live agents, open topics and the
-General topic are never candidates. At most 50 topics go per pass; the rest
-wait for the next one. While sync is off, while the bot cannot manage
+General topic are never candidates. At most 50 topics go per pass; while
+eligible topics remain, the daemon schedules another pass after one minute.
+If a pass deletes none, it waits five minutes before retrying. While sync is
+off, while the bot cannot manage
 topics or while it lacks **Delete messages** the sweep does nothing and
-says so in the log (once per run for the missing right). `Off` disables it;
-`mapping.json` then keeps the entries of exited agents until it holds more
-than 500, when the oldest exited ones are dropped without touching Telegram
-(as before the cleanup existed).
+says so in the log (once per run for the missing right). `Off` disables it
+and retains every topic and mapping entry. The mapping can grow when cleanup
+is off or the bot lacks the required rights; entries are never discarded
+merely to meet a size limit.
+
+Before creating a topic or the dashboard message, the daemon saves a pending
+creation marker in `mapping.json`. It clears the marker only after saving the
+Telegram thread or message id. If the Telegram result is uncertain, or the
+result cannot be saved, the marker prevents an automatic duplicate after a
+restart. The daemon logs the affected agent key or dashboard message id with
+`[FIX]`. Resolve a pending marker only after checking Telegram: retain the
+existing topic or message and restore its id in the mapping when it exists;
+clear the marker only when the external creation definitely did not happen.
 
 ## Inbox
 
@@ -610,10 +695,14 @@ in `config.json`:
 |------|----------|---------|
 | `config.json` | Herdr plugin config dir (`HERDR_PLUGIN_CONFIG_DIR`), mode 0600 | bot token, chat id and title, operator ids, observer ids (`observer_ids`, written by `/observers`), log level |
 | `llm.json` | config dir, mode 0600 | optional cloud endpoint, model and API key for screen rewrite |
-| `mapping.json` | Herdr plugin state dir (`HERDR_PLUGIN_STATE_DIR`) | agent to topic mapping and the dashboard message id (`dashboard_message_id`); entries of exited agents stay until the topic cleanup deletes their topic, or beyond 500 entries |
+| `mapping.json` | Herdr plugin state dir (`HERDR_PLUGIN_STATE_DIR`) | agent to topic mapping, the dashboard message id (`dashboard_message_id`), and pending creation markers; exited entries stay until topic cleanup confirms deletion |
 | `options.json` | config dir, mode 0600 | the `/options` choices |
 | `inbox/` | state dir, mode 0700, files 0600 | attachments sent to topics, swept daily after `Delete files after` |
 | `daemon.pid` | state dir | pid of the running daemon |
+| `update.json` | state dir, mode 0600 | current or last update job, phases, source, versions, rollback data and notification state |
+| `update.lock/` | state dir | exclusive worker ownership; a dead owner can be recovered |
+| `update-worker-<job-id>` and `update-worker.err.log` | state dir | detached worker copy and its stderr; `.exe` on Windows |
+| `update-backups/<job-id>/` | state dir | old linked binary kept for guarded rollback |
 | `daemon.log`, `daemon.log.1`, `daemon.log.2` | state dir | JSON log, rotated at 5 MiB |
 | `daemon.err.log` | state dir | stderr of the last daemon start |
 | `control.sock` | state dir | the daemon's control channel for the stop, resync and status actions (a named pipe on Windows, so no file) |
@@ -623,7 +712,7 @@ A daemon from an older build that does not answer still receives SIGTERM or
 SIGHUP on Unix and is killed if it answers neither. The `status` action prints
 the daemon's own line: `version=… pid=… uptime=… agents=… dropped=… herdr=ok|failing
 since … sync=on|off cleanup=<n>d|off quiet=on|away|away-manual|off
-pager=on|off|unreachable`.
+pager=on|off|unreachable telegram=ready` while polling has started.
 
 `LOG_LEVEL=debug|info|warn|error` in Herdr's environment overrides the level
 saved in `config.json` (default `info`). The daemon writes JSON lines to

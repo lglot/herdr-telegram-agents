@@ -15,12 +15,16 @@ import (
 // Bridge is the goroutine that carries messages between Herdr and the
 // topics: screens out on blocked and done, operator prompts, keys and
 // commands in. It is fed by the daemon loop through Submit so the loop
-// never waits behind a screen read; both sides still share the serial
-// Telegram queue. Fatal Telegram errors are reported through Fatal.
+// queues work with bounded backpressure while screen reads and commands
+// share the serial Telegram queue. Fatal Telegram errors are reported
+// through Fatal.
 type Bridge struct {
-	out  *outbound
-	in   *inbound
-	jobs chan any
+	out *outbound
+	in  *inbound
+	// jobs carries agent state. control preserves the order of
+	// operator actions and asynchronous results under load.
+	jobs    chan any
+	control chan any
 	// fatal carries the first fatal error; the daemon reads it once.
 	fatal   chan error
 	dropped atomic.Int64
@@ -33,7 +37,16 @@ type Bridge struct {
 	wg     sync.WaitGroup
 
 	// CallTimeout bounds one job; tests shorten it.
-	CallTimeout time.Duration
+	CallTimeout   time.Duration
+	pendingUpdate *domain.UpdateJob
+}
+
+// RestoreUpdate schedules a persisted progress view for the first bridge
+// loop iteration, after the Telegram queue has started.
+func (b *Bridge) RestoreUpdate(job domain.UpdateJob) {
+	if job.PanelMessageID > 0 && !job.Terminal() {
+		b.pendingUpdate = &job
+	}
 }
 
 // Services are the optional machine-side helpers the bridge uses: the
@@ -50,7 +63,11 @@ type Services struct {
 	Render domain.Renderer
 	// Config saves config.json when /observers changes the observer list;
 	// nil refuses the change with a notice.
-	Config domain.ConfigStore
+	Config        domain.ConfigStore
+	Updates       *UpdateManager
+	UpdateJobs    domain.UpdateJobStore
+	LaunchUpdate  func(context.Context, string) (int, error)
+	UpdateRunning func() bool
 }
 
 // NewBridge wires the outbound and inbound use cases around the registry,
@@ -78,15 +95,30 @@ func NewBridge(cfg domain.Config, herdr domain.HerdrGateway, tg domain.TelegramG
 		out:         out,
 		in:          in,
 		jobs:        make(chan any, bridgeBuffer),
+		control:     make(chan any, bridgeBuffer),
 		fatal:       make(chan error, 1),
 		log:         log,
 		CallTimeout: bridgeCallTimeout,
+	}
+	in.panel.chatID, in.panel.operators = cfg.ChatID, append([]int64(nil), cfg.OperatorIDs...)
+	in.panel.updates, in.panel.jobs = svc.Updates, svc.UpdateJobs
+	in.panel.launch, in.panel.running = svc.LaunchUpdate, svc.UpdateRunning
+	in.panel.async = func(run func(context.Context) any) {
+		b.spawn(func(ctx context.Context) {
+			if err := b.SubmitContext(ctx, run(ctx)); err != nil && ctx.Err() == nil {
+				b.log.Warn("update result not accepted", slog.String("err", err.Error()))
+			}
+		})
 	}
 	// Slow work (agent.start, a file download) runs off the loop and
 	// reports back as a job, so the bridge stays the only writer to
 	// Telegram.
 	in.async = func(run func(context.Context) any) {
-		b.spawn(func(ctx context.Context) { b.Submit(run(ctx)) })
+		b.spawn(func(ctx context.Context) {
+			if err := b.SubmitContext(ctx, run(ctx)); err != nil && ctx.Err() == nil {
+				b.log.Warn("[FIX] bridge async result not accepted", slog.String("err", err.Error()))
+			}
+		})
 	}
 	return b
 }
@@ -156,32 +188,46 @@ func (b *Bridge) SetSettle(d time.Duration) {
 // Fatal delivers the first fatal Telegram error met by a job.
 func (b *Bridge) Fatal() <-chan error { return b.fatal }
 
-// Submit queues a job without blocking: an AgentEvent, a TopicMessage, a
-// TopicAttachment, a ButtonPressed or a GeneralCommand. When the buffer is full the job is dropped and counted;
-// the daemon reports the count at most once per dropReportInterval and the
-// next event or a resync brings the state back.
+// Submit is a convenience for producers without their own context. Production
+// producers should use SubmitContext so shutdown can release blocked sends.
 func (b *Bridge) Submit(job any) {
-	switch job.(type) {
-	case AgentEvent, domain.TopicMessage, domain.TopicAttachment, domain.ButtonPressed, domain.GeneralCommand, presenceAway, startResult, inboxResult:
-	default:
-		b.log.Warn("bridge job of unknown type dropped", slog.String("type", fmt.Sprintf("%T", job)))
-		return
-	}
-	select {
-	case b.jobs <- job:
-	default:
-		n := b.dropped.Add(1)
-		b.log.Debug("bridge overflow, job dropped", slog.String("type", fmt.Sprintf("%T", job)), slog.Int64("dropped", n))
+	if err := b.SubmitContext(context.Background(), job); err != nil {
+		b.log.Warn("[FIX] bridge job not accepted", slog.String("err", err.Error()))
 	}
 }
 
-// Dropped returns how many jobs were lost to overflow.
+// SubmitContext accepts all known work with cancellable backpressure.
+// State and control have separate bounded queues; neither may be lost.
+func (b *Bridge) SubmitContext(ctx context.Context, job any) error {
+	var queue chan any
+	switch job.(type) {
+	case AgentEvent:
+		queue = b.jobs
+	case domain.TopicMessage, domain.TopicAttachment, domain.ButtonPressed, domain.GeneralCommand, domain.StrangerSeen, presenceAway, startResult, inboxResult, updateCheckResult, updateStartResult:
+		queue = b.control
+	default:
+		b.log.Warn("bridge job of unknown type dropped", slog.String("type", fmt.Sprintf("%T", job)))
+		return fmt.Errorf("bridge job of unknown type: %T", job)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case queue <- job:
+		b.log.Debug("[FIX] bridge job accepted", slog.String("type", fmt.Sprintf("%T", job)))
+		return nil
+	}
+}
+
+// Dropped is retained for the daemon's legacy health metric. Reliable ingress
+// no longer discards known jobs, so it remains zero.
 func (b *Bridge) Dropped() int64 { return b.dropped.Load() }
 
 // Handled returns how many jobs the bridge has taken off its queue. A
-// test that floods the queue waits on it between bursts: Submit never
-// blocks, so a producer that outruns the bridge goroutine sees drops that
-// say nothing about the code under test.
+// test that floods the queue waits on it between bursts to avoid measuring
+// scheduler timing instead of bridge behavior.
 func (b *Bridge) Handled() int64 { return b.handled.Load() }
 
 // Run serves jobs, screen settle timers and command follow-up timers until
@@ -189,24 +235,75 @@ func (b *Bridge) Handled() int64 { return b.handled.Load() }
 // Fatal and the daemon decides.
 func (b *Bridge) Run(ctx context.Context) {
 	b.log.Info("bridge started")
+	if b.pendingUpdate != nil {
+		job := *b.pendingUpdate
+		b.run(ctx, "update_resume", func(ctx context.Context) error { return b.in.panel.restoreUpdate(ctx, job) })
+	}
 	defer func() {
 		b.log.Info("[FIX] bridge stopped", slog.Int64("handled", b.handled.Load()), slog.Int64("dropped", b.dropped.Load()))
 	}()
 	b.runCtx = ctx
 	defer b.wg.Wait()
+	controlBurst := 0
 	for {
+		// Bound consecutive control jobs. A ready state event or timer gets
+		// a chance after four controls, while commands remain FIFO.
+		if controlBurst < 4 {
+			select {
+			case <-ctx.Done():
+				return
+			case job := <-b.control:
+				b.handle(ctx, job)
+				b.handled.Add(1)
+				controlBurst++
+				continue
+			default:
+			}
+		}
+		if controlBurst >= 4 {
+			select {
+			case <-ctx.Done():
+				return
+			case job := <-b.jobs:
+				b.handle(ctx, job)
+				b.handled.Add(1)
+				controlBurst = 0
+				continue
+			case key := <-b.out.Due():
+				b.run(ctx, "screen", func(ctx context.Context) error { return b.out.Fire(ctx, key) })
+				controlBurst = 0
+				continue
+			case key := <-b.in.Due():
+				b.run(ctx, "command", func(ctx context.Context) error { return b.in.Fire(ctx, key) })
+				controlBurst = 0
+				continue
+			case key := <-b.out.TurnDue():
+				b.run(ctx, "turn", func(ctx context.Context) error { return b.out.EndTurn(ctx, key) })
+				controlBurst = 0
+				continue
+			default:
+			}
+		}
 		select {
 		case <-ctx.Done():
 			return
+		case job := <-b.control:
+			b.handle(ctx, job)
+			b.handled.Add(1)
+			controlBurst++
 		case job := <-b.jobs:
 			b.handle(ctx, job)
 			b.handled.Add(1)
+			controlBurst = 0
 		case key := <-b.out.Due():
 			b.run(ctx, "screen", func(ctx context.Context) error { return b.out.Fire(ctx, key) })
+			controlBurst = 0
 		case key := <-b.in.Due():
 			b.run(ctx, "command", func(ctx context.Context) error { return b.in.Fire(ctx, key) })
+			controlBurst = 0
 		case key := <-b.out.TurnDue():
 			b.run(ctx, "turn", func(ctx context.Context) error { return b.out.EndTurn(ctx, key) })
+			controlBurst = 0
 		}
 	}
 }
@@ -256,6 +353,10 @@ func (b *Bridge) handle(ctx context.Context, job any) {
 	case startResult:
 		b.log.Debug("bridge job", slog.String("kind", "start_result"), slog.Int("message_id", j.messageID), slog.Bool("ok", j.err == nil))
 		b.run(ctx, "start_result", func(ctx context.Context) error { return b.in.StartFinished(ctx, j) })
+	case updateCheckResult:
+		b.run(ctx, "update_check_result", func(ctx context.Context) error { return b.in.panel.checkFinished(ctx, j) })
+	case updateStartResult:
+		b.run(ctx, "update_start_result", func(ctx context.Context) error { return b.in.panel.startFinished(ctx, j) })
 	}
 }
 

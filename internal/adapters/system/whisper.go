@@ -106,7 +106,7 @@ func (w *Whisper) Transcribe(ctx context.Context, path string) (string, error) {
 // run executes bin with args and returns stdout; a failure carries the
 // trimmed stderr.
 func run(ctx context.Context, bin string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd := command(ctx, bin, args...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err != nil {
