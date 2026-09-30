@@ -60,6 +60,8 @@ const (
 	CmdObservers CommandKind = "observers"
 	// CmdUnknown is a slash word the plugin does not know; Text holds it.
 	CmdUnknown CommandKind = "unknown"
+	CmdShare   CommandKind = "share"
+	CmdShares  CommandKind = "shares"
 )
 
 // Key names the control commands send through agent.send_keys.
@@ -422,6 +424,10 @@ func ParseCommand(text, botUsername string) Command {
 	// so a forwarded /compact instruction reaches the agent as typed.
 	rest := strings.TrimSpace(strings.TrimPrefix(trimmed, fields[0]))
 	switch word {
+	case "share":
+		return Command{Kind: CmdShare, Text: rest}
+	case "shares":
+		return Command{Kind: CmdShares, Text: rest}
 	case "screen":
 		return parseScreen(args)
 	case "keys":
