@@ -68,7 +68,7 @@ func (p *UpdatePreflight) Check(ctx context.Context, release domain.Release) (Up
 	}
 	switch install.SourceKind {
 	case "github":
-		if !strings.EqualFold(install.Owner, "permgps") || !strings.EqualFold(install.Repo, "herdr-telegram-agents") || install.ManagedPath == "" {
+		if !strings.EqualFold(install.Owner, "lglot") || !strings.EqualFold(install.Repo, "herdr-telegram-agents") || install.ManagedPath == "" {
 			return block("wrong_repository", "This managed plugin came from another repository.")
 		}
 		managed, err1 := filepath.EvalSymlinks(install.ManagedPath)
@@ -100,10 +100,10 @@ func (p *UpdatePreflight) Check(ctx context.Context, release domain.Release) (Up
 			return UpdateEligibility{}, fmt.Errorf("inspect checkout: %w", err)
 		}
 		result.Checkout = checkout
-		if !strings.EqualFold(checkout.Origin, "git@github.com:permgps/herdr-telegram-agents.git") &&
-			!strings.EqualFold(checkout.Origin, "git@github.com:permgps/herdr-telegram-agents") &&
-			!strings.EqualFold(checkout.Origin, "https://github.com/permgps/herdr-telegram-agents.git") &&
-			!strings.EqualFold(checkout.Origin, "https://github.com/permgps/herdr-telegram-agents") {
+		if !strings.EqualFold(checkout.Origin, "git@github.com:lglot/herdr-telegram-agents.git") &&
+			!strings.EqualFold(checkout.Origin, "git@github.com:lglot/herdr-telegram-agents") &&
+			!strings.EqualFold(checkout.Origin, "https://github.com/lglot/herdr-telegram-agents.git") &&
+			!strings.EqualFold(checkout.Origin, "https://github.com/lglot/herdr-telegram-agents") {
 			return block("wrong_repository", "The linked checkout has another Git origin.")
 		}
 		if checkout.Branch != "main" {

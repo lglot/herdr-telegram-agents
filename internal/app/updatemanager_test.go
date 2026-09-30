@@ -43,7 +43,7 @@ func TestUpdateIntentBindingReplayExpiryAndDrift(t *testing.T) {
 	if err := os.Mkdir(root, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	preflight := &UpdatePreflight{Installation: installReader{domain.PluginInstallation{Root: root, ManifestVersion: "1.0.0", BinaryVersion: "1.0.0", SourceKind: "github", Owner: "permgps", Repo: "herdr-telegram-agents", ManagedPath: managed, ResolvedCommit: "old-commit"}}}
+	preflight := &UpdatePreflight{Installation: installReader{domain.PluginInstallation{Root: root, ManifestVersion: "1.0.0", BinaryVersion: "1.0.0", SourceKind: "github", Owner: "lglot", Repo: "herdr-telegram-agents", ManagedPath: managed, ResolvedCommit: "old-commit"}}}
 	m := &UpdateManager{Releases: source, Preflight: preflight, Herdr: fakeHerdrProber{}, Now: func() time.Time { return now }}
 	check, err := m.Check(context.Background(), 42, 100, 7)
 	if err != nil || check.IntentID == "" {

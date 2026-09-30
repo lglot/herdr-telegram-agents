@@ -86,7 +86,7 @@ func TestUpdateInstallerManagedExactRefsAndWindowsCommand(t *testing.T) {
 	if err := i.Rollback(context.Background(), managed); err != nil {
 		t.Fatal(err)
 	}
-	if commands[0] != "herdr plugin install permgps/herdr-telegram-agents --ref v1.2.0 --yes" || commands[1] != "herdr plugin install permgps/herdr-telegram-agents --ref abc123 --yes" {
+	if commands[0] != "herdr plugin install lglot/herdr-telegram-agents --ref v1.2.0 --yes" || commands[1] != "herdr plugin install lglot/herdr-telegram-agents --ref abc123 --yes" {
 		t.Fatalf("commands=%v", commands)
 	}
 	i.StateDir = t.TempDir()

@@ -61,10 +61,10 @@ func (i *CheckoutInspector) InspectCheckout(ctx context.Context, root, tag strin
 }
 
 func expectedOrigin(raw string) bool {
-	return raw == "git@github.com:permgps/herdr-telegram-agents.git" ||
-		raw == "git@github.com:permgps/herdr-telegram-agents" ||
-		raw == "https://github.com/permgps/herdr-telegram-agents.git" ||
-		raw == "https://github.com/permgps/herdr-telegram-agents"
+	return raw == "git@github.com:lglot/herdr-telegram-agents.git" ||
+		raw == "git@github.com:lglot/herdr-telegram-agents" ||
+		raw == "https://github.com/lglot/herdr-telegram-agents.git" ||
+		raw == "https://github.com/lglot/herdr-telegram-agents"
 }
 
 func checkoutGit(ctx context.Context, root string, args ...string) (string, error) {

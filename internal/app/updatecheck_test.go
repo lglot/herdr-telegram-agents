@@ -29,8 +29,8 @@ func TestUpdatePreflightBlockers(t *testing.T) {
 	if err := os.Mkdir(root, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	base := domain.PluginInstallation{Root: root, ManifestVersion: "1.0.0", BinaryVersion: "1.0.0", SourceKind: "github", Owner: "permgps", Repo: "herdr-telegram-agents", ManagedPath: managed, ResolvedCommit: "old-commit"}
-	local := domain.CheckoutState{Branch: "main", Origin: "https://github.com/permgps/herdr-telegram-agents.git", Commit: "old", TargetCommit: "new", FastForward: true}
+	base := domain.PluginInstallation{Root: root, ManifestVersion: "1.0.0", BinaryVersion: "1.0.0", SourceKind: "github", Owner: "lglot", Repo: "herdr-telegram-agents", ManagedPath: managed, ResolvedCommit: "old-commit"}
+	local := domain.CheckoutState{Branch: "main", Origin: "https://github.com/lglot/herdr-telegram-agents.git", Commit: "old", TargetCommit: "new", FastForward: true}
 	for _, tc := range []struct {
 		name   string
 		change func(*domain.PluginInstallation, *domain.CheckoutState)

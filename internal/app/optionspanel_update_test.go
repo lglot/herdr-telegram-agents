@@ -19,7 +19,7 @@ func TestPanelUpdateCheckAuthorizationAndDuplicatePresses(t *testing.T) {
 	}
 	v, _ := domain.ParseVersion("1.2.0")
 	source := &fakeReleaseSource{release: domain.Release{Tag: "v1.2.0", Version: v, AssetURL: "asset", ChecksumsURL: "sums"}, checksum: "digest"}
-	manager := &UpdateManager{Releases: source, Preflight: &UpdatePreflight{Installation: installReader{domain.PluginInstallation{Root: root, ManifestVersion: "1.0.0", BinaryVersion: "1.0.0", SourceKind: "github", Owner: "permgps", Repo: "herdr-telegram-agents", ManagedPath: managed, ResolvedCommit: "old"}}}, Herdr: fakeHerdrProber{}, Now: f.clock.Now}
+	manager := &UpdateManager{Releases: source, Preflight: &UpdatePreflight{Installation: installReader{domain.PluginInstallation{Root: root, ManifestVersion: "1.0.0", BinaryVersion: "1.0.0", SourceKind: "github", Owner: "lglot", Repo: "herdr-telegram-agents", ManagedPath: managed, ResolvedCommit: "old"}}}, Herdr: fakeHerdrProber{}, Now: f.clock.Now}
 	p := f.in.panel
 	p.chatID, p.operators = f.cfg.ChatID, []int64{1}
 	p.updates = manager

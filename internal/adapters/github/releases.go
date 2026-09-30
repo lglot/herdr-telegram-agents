@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	defaultURL  = "https://api.github.com/repos/permgps/herdr-telegram-agents/releases"
+	defaultURL  = "https://api.github.com/repos/lglot/herdr-telegram-agents/releases"
 	maxPages    = 20
 	pageSize    = 100
 	maxResponse = 4 << 20
@@ -266,7 +266,7 @@ func (s *Source) Manifest(ctx context.Context, release domain.Release) (domain.R
 	}
 	base := s.ManifestBase
 	if base == "" {
-		base = "https://raw.githubusercontent.com/permgps/herdr-telegram-agents"
+		base = "https://raw.githubusercontent.com/lglot/herdr-telegram-agents"
 	}
 	address := strings.TrimRight(base, "/") + "/" + url.PathEscape(release.Tag) + "/herdr-plugin.toml"
 	client := s.Client

@@ -95,7 +95,7 @@ func (i *UpdateInstaller) Install(ctx context.Context, job domain.UpdateJob) err
 		if bin == "" {
 			bin = "herdr"
 		}
-		if err := i.run(ctx, "", bin, "plugin", "install", "permgps/herdr-telegram-agents", "--ref", job.TargetTag, "--yes"); err != nil {
+		if err := i.run(ctx, "", bin, "plugin", "install", "lglot/herdr-telegram-agents", "--ref", job.TargetTag, "--yes"); err != nil {
 			return fmt.Errorf("managed install: %w", err)
 		}
 	case "local":
@@ -159,7 +159,7 @@ func (i *UpdateInstaller) Rollback(ctx context.Context, job domain.UpdateJob) er
 		if job.OldCommit == "" {
 			return fmt.Errorf("old managed commit missing")
 		}
-		return i.run(ctx, "", bin, "plugin", "install", "permgps/herdr-telegram-agents", "--ref", job.OldCommit, "--yes")
+		return i.run(ctx, "", bin, "plugin", "install", "lglot/herdr-telegram-agents", "--ref", job.OldCommit, "--yes")
 	case "local":
 		if job.OldCommit == "" || job.OldBinaryBackup == "" {
 			return fmt.Errorf("old linked artifacts missing")

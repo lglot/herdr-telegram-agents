@@ -21,7 +21,7 @@ if [ -z "$version" ]; then
 	echo "usage: sh scripts/verify-install.sh <version> [linux|macos|all]" >&2
 	exit 2
 fi
-repo_url=${HERDR_TG_REPO_URL:-https://github.com/permgps/herdr-telegram-agents}
+repo_url=${HERDR_TG_REPO_URL:-https://github.com/lglot/herdr-telegram-agents}
 tag="v${version}"
 
 verify_linux() {
